@@ -6,10 +6,10 @@ import { HistoryChart, type SeriesDef } from "../components/charts";
 import type { HistoryPoint, HistoryRange } from "../types";
 import { fmtDateTime, kwh } from "../utils/format";
 
-const S_PV: SeriesDef = { key: "pv", name: "PV", color: "#FFC400", unit: "W" };
-const S_BATT: SeriesDef = { key: "batt", name: "Battery", color: "#2F9BE8", unit: "W" };
-const S_LOAD: SeriesDef = { key: "load", name: "Load", color: "#FF3D32", unit: "W" };
-const S_SOC: SeriesDef = { key: "soc", name: "SOC", color: "#70D900", unit: "%" };
+const S_PV: SeriesDef = { key: "pv", name: "Мощность PV", color: "#FFC400", unit: "W" };
+const S_BATT: SeriesDef = { key: "batt", name: "Мощность батареи", color: "#2F9BE8", unit: "W" };
+const S_LOAD: SeriesDef = { key: "load", name: "Мощность нагрузки", color: "#FF3D32", unit: "W" };
+const S_SOC: SeriesDef = { key: "soc", name: "Заряд (SOC)", color: "#70D900", unit: "%" };
 
 export function StatsPage() {
   const { data, fetchHistory } = useData();
@@ -39,23 +39,35 @@ export function StatsPage() {
   return (
     <div>
       {/* накопительная статистика */}
-      <Card title="Статистика · Накопленные значения" icon={<BarChart3 size={13} />} delay={0}>
+      <Card title="Статистика · накопленные значения" icon={<BarChart3 size={13} />} delay={0}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          <Metric label="Daily Charge" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh" />
-          <Metric label="Daily Load" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
-          <Metric label="Total Charge" value={data?.totalChargeAh} digits={1} unitStr="Ah" source="/api/data · totalChargeAh" />
-          <Metric label="Total Load" value={data?.totalLoadAh} digits={1} unitStr="Ah" source="/api/data · totalLoadAh" />
-          <Metric label="Running Days" value={data?.runningDays} digits={0} unitStr="дн" source="/api/data · runningDays" />
-          <Metric label="Total Charge Energy" value={data?.totalChargeWh} digits={0} unitStr="Wh" source="/api/data · totalChargeWh"
-            sub={<span className="num">{kwh(data?.totalChargeWh)}</span>} />
-          <Metric label="Total Load Energy" value={data?.totalLoadWh} digits={0} unitStr="Wh" source="/api/data · totalLoadWh"
-            sub={<span className="num">{kwh(data?.totalLoadWh)}</span>} />
-          <Metric label="Full Charges" value={data?.fullCharges} digits={0} source="/api/data · fullCharges" />
-          <Metric label="Over Discharges" value={data?.overDischarges} digits={0} tone="bad" source="/api/data · overDischarges" />
+          <Metric label="Заряд за день" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh" />
+          <Metric label="Нагрузка за день" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
+          <Metric label="Общий заряд" value={data?.totalChargeAh} digits={1} unitStr="Ah" source="/api/data · totalChargeAh" />
+          <Metric label="Общая нагрузка" value={data?.totalLoadAh} digits={1} unitStr="Ah" source="/api/data · totalLoadAh" />
+          <Metric label="Дни работы" value={data?.runningDays} digits={0} unitStr="дн" source="/api/data · runningDays" />
+          <Metric
+            label="Общая энергия заряда"
+            value={data?.totalChargeWh}
+            digits={0}
+            unitStr="Wh"
+            source="/api/data · totalChargeWh"
+            sub={<span className="num">{kwh(data?.totalChargeWh)}</span>}
+          />
+          <Metric
+            label="Общая энергия нагрузки"
+            value={data?.totalLoadWh}
+            digits={0}
+            unitStr="Wh"
+            source="/api/data · totalLoadWh"
+            sub={<span className="num">{kwh(data?.totalLoadWh)}</span>}
+          />
+          <Metric label="Полные заряды" value={data?.fullCharges} digits={0} source="/api/data · fullCharges" />
+          <Metric label="Глубокие разряды" value={data?.overDischarges} digits={0} tone="bad" source="/api/data · overDischarges" />
         </div>
       </Card>
 
-      {/* история */}
+      {/* история мощности */}
       <Card
         title="История · GET /api/history"
         icon={<BarChart3 size={13} />}
@@ -83,9 +95,10 @@ export function StatsPage() {
               ))}
             </div>
             <span className="num text-[9.5px] text-mut hidden sm:inline">
-              {points.length} pts{loadedAt ? ` · ${fmtDateTime(loadedAt)}` : ""}
+              точек: {points.length}
+              {loadedAt ? ` · ${fmtDateTime(loadedAt)}` : ""}
             </span>
-            <IconBtn title="Обновить историю" onClick={() => load(range)} busy={loading}>
+            <IconBtn title="Обновить историю (GET /api/history)" onClick={() => load(range)} busy={loading}>
               <RefreshCw size={12} />
             </IconBtn>
           </div>
@@ -102,23 +115,25 @@ export function StatsPage() {
         ) : (
           <div className="grid lg:grid-cols-2 gap-x-3 gap-y-4 p-3.5">
             <div>
-              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">SOC History</div>
+              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">История SOC</div>
               <HistoryChart points={points} series={[S_SOC]} />
             </div>
             <div>
-              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">PV Power History</div>
+              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Мощность PV</div>
               <HistoryChart points={points} series={[S_PV]} />
             </div>
             <div>
-              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Battery Power History</div>
+              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Мощность батареи</div>
               <HistoryChart points={points} series={[S_BATT]} />
             </div>
             <div>
-              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Load Power History</div>
+              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Мощность нагрузки</div>
               <HistoryChart points={points} series={[S_LOAD]} />
             </div>
             <div className="lg:col-span-2">
-              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Energy History</div>
+              <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">
+                История мощности (PV / батарея / нагрузка)
+              </div>
               <HistoryChart points={points} series={[S_PV, S_BATT, S_LOAD]} height={230} />
             </div>
           </div>

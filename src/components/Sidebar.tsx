@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import { useData } from "../store/DataContext";
 import { apiOriginLabel } from "../services/api";
-import { Led } from "./ui";
+import { SubsystemChip } from "./ui";
+import type { SubsystemState } from "../types";
 
 export type PageId = "home" | "battery" | "bms" | "solar" | "stats" | "settings" | "engineering";
 
@@ -21,25 +22,17 @@ export const NAV_ITEMS: { id: PageId; label: string; icon: LucideIcon }[] = [
   { id: "solar", label: "Солнце", icon: Sun },
   { id: "stats", label: "Статистика", icon: BarChart3 },
   { id: "settings", label: "Настройки", icon: Settings },
-  { id: "engineering", label: "Инженерное меню", icon: Wrench },
+  { id: "engineering", label: "Инженерный режим", icon: Wrench },
 ];
-
-const CONN_COLOR: Record<string, string> = {
-  ONLINE: "#70D900",
-  STALE: "#FFC400",
-  CONNECTING: "#0878D1",
-  RECONNECTING: "#FFC400",
-  OFFLINE: "#FF3D32",
-};
-
-const SUB_COLOR: Record<string, string> = {
-  ONLINE: "#70D900",
-  OFFLINE: "#FF3D32",
-  NO_DATA: "#8A969F",
-};
 
 export function Sidebar({ page, onNavigate }: { page: PageId; onNavigate: (p: PageId) => void }) {
   const { conn, bmsState, controllerState } = useData();
+
+  const rows: { label: string; state: SubsystemState }[] = [
+    { label: "Шлюз ESP32", state: conn === "ONLINE" ? "ONLINE" : conn === "STALE" ? "STALE" : conn === "OFFLINE" ? "OFFLINE" : "NO_DATA" },
+    { label: "BMS (JBD)", state: bmsState },
+    { label: "Контроллер (Modbus)", state: controllerState },
+  ];
 
   return (
     <aside className="hidden md:flex flex-col w-[196px] shrink-0 border-r border-line bg-panel/70">
@@ -66,23 +59,14 @@ export function Sidebar({ page, onNavigate }: { page: PageId; onNavigate: (p: Pa
 
       {/* состояния подсистем */}
       <div className="p-2.5 border-t border-line space-y-[7px]">
-        {(
-          [
-            ["GATEWAY", conn, CONN_COLOR[conn]],
-            ["BMS (JBD)", bmsState, SUB_COLOR[bmsState]],
-            ["MPPT (Modbus)", controllerState, SUB_COLOR[controllerState]],
-          ] as [string, string, string][]
-        ).map(([label, state, color]) => (
-          <div key={label} className="flex items-center justify-between px-1">
-            <span className="text-[9.5px] tracking-[0.12em] text-mut uppercase">{label}</span>
-            <span className="flex items-center gap-1.5 text-[9.5px] font-semibold" style={{ color }}>
-              <Led color={color} pulse={state === "ONLINE"} />
-              {state === "NO_DATA" ? "N/A" : state}
-            </span>
+        {rows.map(({ label, state }) => (
+          <div key={label} className="flex items-center justify-between gap-2 px-1">
+            <span className="text-[9.5px] tracking-[0.1em] text-mut uppercase">{label}</span>
+            <SubsystemChip state={state} />
           </div>
         ))}
         <div className="px-1 pt-1.5 border-t border-line/60">
-          <div className="text-[9px] text-mut/70 uppercase tracking-[0.12em]">Gateway URL</div>
+          <div className="text-[9px] text-mut/70 uppercase tracking-[0.12em]">Адрес шлюза</div>
           <div className="num text-[10px] text-mut truncate mt-0.5" title={apiOriginLabel()}>
             {apiOriginLabel()}
           </div>

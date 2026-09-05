@@ -29,7 +29,7 @@ function Shell() {
                 {current?.label ?? "SmartWatt"}
               </h1>
               <span className="h-px flex-1 bg-line" />
-              <span className="num text-[10px] text-mut/70 hidden sm:inline">ESP32 Gateway · realtime telemetry</span>
+              <span className="num text-[10px] text-mut/70 hidden sm:inline">ESP32 Gateway · телеметрия в реальном времени</span>
             </div>
             <div key={page} className="page-anim pb-4">
               {page === "home" && <HomePage />}

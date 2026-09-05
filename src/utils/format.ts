@@ -1,7 +1,9 @@
 /**
  * Утилиты отображения значений.
- * Железное правило: null / undefined / NaN / отсутствующее поле => "—".
- * Никакой подмены нулём или "красивыми" числами.
+ * Железное правило: null / undefined / NaN / Infinity / отсутствующее поле => "—".
+ * Никакой подмены нулём или "красивыми" числами, никакой ложной точности.
+ * Числа форматируются в русской нотации: десятичная запятая (12,84 V).
+ * Единицы измерения не изменяются: V, A, W, Ah, Wh, °C, %.
  */
 
 export const DASH = "—";
@@ -32,18 +34,26 @@ export function isMissing(v: unknown): boolean {
   return num(v) === null && toBool(v) === null && (v === null || v === undefined || v === "");
 }
 
-/** Число с фиксированным знаком, либо "—". */
+/** Число в русской нотации с фиксированным числом знаков. */
+export function ruNum(n: number, digits = 1): string {
+  return n.toLocaleString("ru-RU", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+/** Число с заданной точностью, либо "—". */
 export function fmt(v: unknown, digits = 1): string {
   const n = num(v);
   if (n === null) return DASH;
-  return n.toFixed(digits);
+  return ruNum(n, digits);
 }
 
 /** Число + единица измерения, либо "—". */
 export function unit(v: unknown, digits: number, u: string): string {
   const n = num(v);
   if (n === null) return DASH;
-  return `${n.toFixed(digits)} ${u}`;
+  return `${ruNum(n, digits)} ${u}`;
 }
 
 /** Число со знаком (+/-) + единица, либо "—". */
@@ -51,33 +61,33 @@ export function signed(v: unknown, digits: number, u: string): string {
   const n = num(v);
   if (n === null) return DASH;
   const s = n > 0 ? "+" : "";
-  return `${s}${n.toFixed(digits)} ${u}`;
+  return `${s}${ruNum(n, digits)} ${u}`;
 }
 
 export function pct(v: unknown, digits = 0): string {
   const n = num(v);
   if (n === null) return DASH;
-  return `${n.toFixed(digits)}%`;
+  return `${ruNum(n, digits)} %`;
 }
 
 export function int(v: unknown): string {
   const n = num(v);
   if (n === null) return DASH;
-  return Math.round(n).toString();
+  return Math.round(n).toLocaleString("ru-RU");
 }
 
 /** Wh → kWh — математическое преобразование единиц, разрешено спецификацией. */
 export function kwh(wh: unknown, digits = 2): string {
   const n = num(wh);
   if (n === null) return DASH;
-  return `${(n / 1000).toFixed(digits)} kWh`;
+  return `${ruNum(n / 1000, digits)} кВт·ч`;
 }
 
 /** Байты → КБ. */
 export function kbytes(v: unknown): string {
   const n = num(v);
   if (n === null) return DASH;
-  return `${(n / 1024).toFixed(1)} KB`;
+  return `${ruNum(n / 1024, 1)} КБ`;
 }
 
 /** Строка как есть, либо "—". */
@@ -91,6 +101,12 @@ export function boolChip(v: unknown): "ON" | "OFF" | null {
   const b = toBool(v);
   if (b === null) return null;
   return b ? "ON" : "OFF";
+}
+
+export function yesNo(v: unknown): string {
+  const b = toBool(v);
+  if (b === null) return DASH;
+  return b ? "Да" : "Нет";
 }
 
 /** Timestamp (сек или мс) → мс. Некорректный → null. */
@@ -141,12 +157,12 @@ export function dur(ms: unknown): string {
   return `${d} д ${h % 24} ч`;
 }
 
-/** Возраст данных: "0.8 с" / "45 с" / "3 мин". */
+/** Возраст данных: "850 мс" / "1,2 с" / "3 мин". */
 export function age(ms: unknown): string {
   const n = num(ms);
   if (n === null) return DASH;
   if (n < 1000) return `${Math.round(n)} мс`;
-  if (n < 60000) return `${(n / 1000).toFixed(1)} с`;
+  if (n < 60000) return `${ruNum(n / 1000, 1)} с`;
   return `${Math.floor(n / 60000)} мин`;
 }
 

@@ -26,9 +26,9 @@ export function apiBase(): string {
 export function apiOriginLabel(): string {
   if (GATEWAY_BASE) return GATEWAY_BASE;
   try {
-    return window.location.origin + " (same-origin)";
+    return window.location.origin + " (локально)";
   } catch {
-    return "(same-origin)";
+    return "(локально)";
   }
 }
 

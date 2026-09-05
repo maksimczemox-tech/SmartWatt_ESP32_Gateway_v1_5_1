@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Braces,
+  CircuitBoard,
   Cpu,
   FileText,
   MemoryStick,
@@ -23,6 +24,8 @@ import {
   JsonViewer,
   OnOffChip,
   CopyBtn,
+  Metric,
+  SectionTitle,
 } from "../components/ui";
 import type { EngineeringData, LogEntry, RawData } from "../types";
 import { boolChip, fmt, fmtTime, normTs, str, toBool } from "../utils/format";
@@ -103,8 +106,9 @@ function HexLine({ label, value }: { label: string; value: unknown }) {
 
 export function EngineeringPage() {
   const {
-    status,
+    data,
     bms,
+    status,
     showSources,
     setShowSources,
     fetchEngineering,
@@ -112,7 +116,6 @@ export function EngineeringPage() {
     fetchLogs,
     clearLogs,
     resetDiagnostics,
-    refreshTelemetry,
   } = useData();
 
   const [eng, setEng] = useState<EngineeringData | null>(null);
@@ -132,8 +135,7 @@ export function EngineeringPage() {
     setRawErr(false);
     setLogsErr(false);
     Promise.allSettled([fetchEngineering(), fetchRaw(), fetchLogs()]).then((res) => {
-      if (res[0].status === "fulfilled") setEng(res[0].value);
-      else setEng(null);
+      setEng(res[0].status === "fulfilled" ? res[0].value : null);
       if (res[1].status === "fulfilled") setRaw(res[1].value);
       else setRawErr(true);
       if (res[2].status === "fulfilled") setLogs(res[2].value);
@@ -151,11 +153,11 @@ export function EngineeringPage() {
     setBusyClear(true);
     clearLogs()
       .then(() => {
-        setNote("Логи очищены (POST /api/logs/clear)");
+        setNote("Журнал очищен (POST /api/logs/clear)");
         setConfirmClear(false);
         return fetchLogs().then(setLogs).catch(() => setLogs([]));
       })
-      .catch(() => setNote("POST /api/logs/clear не выполнен"))
+      .catch(() => setNote("Не удалось очистить журнал (POST /api/logs/clear)"))
       .finally(() => setBusyClear(false));
   };
 
@@ -163,11 +165,11 @@ export function EngineeringPage() {
     setBusyReset(true);
     resetDiagnostics()
       .then(() => {
-        setNote("Диагностика сброшена, данные обновлены с Gateway");
+        setNote("Счётчики диагностики сброшены, данные обновлены с Gateway");
         setConfirmReset(false);
         loadAll();
       })
-      .catch(() => setNote("POST /api/diagnostics/reset не выполнен"))
+      .catch(() => setNote("Не удалось сбросить диагностику (POST /api/diagnostics/reset)"))
       .finally(() => setBusyReset(false));
   };
 
@@ -175,18 +177,34 @@ export function EngineeringPage() {
   const wifiSec = findSection(eng, ["wifi", "wi-fi", "network"]);
   const modbus = findSection(eng, ["modbus", "mppt"]);
   const jbd = findSection(eng, ["jbd", "bms"]);
-  const memory = findSection(eng, ["memory", "heap", "ram"]);
+  const memory = findSection(eng, ["memory", "heap", "ram", "psram"]);
   const diagSec = findSection(eng, ["diagnostics", "diag", "stats"]);
 
+  const bmsLive: [string, unknown][] | null = bms
+    ? [
+        ["online", bms.online ?? null],
+        ["data_age_ms", bms.data_age_ms ?? null],
+        ["voltage", bms.voltage ?? null],
+        ["current", bms.current ?? null],
+        ["soc", bms.soc ?? null],
+        ["cell_count", bms.cell_count ?? null],
+        ["ntc_count", bms.ntc_count ?? null],
+        ["protection_text", bms.protection_text ?? null],
+      ]
+    : null;
+  const bmsSec = findSection(eng, ["bms"]) ?? bmsLive;
+
   const diagRows: [string, unknown][] = [
-    ["Modbus Errors", status?.modbus_errors ?? null],
-    ["Modbus Retries", status?.modbus_retries ?? null],
-    ["Last Modbus Error", status?.last_modbus_error ?? null],
-    ["JBD Requests", bms?.diagnostics?.requests ?? status?.bms_requests ?? null],
-    ["JBD Errors", bms?.diagnostics?.errors ?? status?.bms_errors ?? null],
-    ["JBD Timeouts", bms?.diagnostics?.timeouts ?? null],
-    ["CRC Errors", bms?.diagnostics?.crc_errors ?? null],
-    ["Protocol Errors", bms?.diagnostics?.protocol_errors ?? null],
+    ["Ошибки Modbus", status?.modbus_errors ?? null],
+    ["Повторные попытки Modbus", status?.modbus_retries ?? null],
+    ["Последняя ошибка Modbus", status?.last_modbus_error ?? null],
+    ["Запросы JBD", bms?.diagnostics?.requests ?? status?.bms_requests ?? null],
+    ["Успешные запросы JBD", bms?.diagnostics?.successful ?? null],
+    ["Ошибки JBD", bms?.diagnostics?.errors ?? status?.bms_errors ?? null],
+    ["Тайм-ауты JBD", bms?.diagnostics?.timeouts ?? null],
+    ["Ошибки CRC", bms?.diagnostics?.crc_errors ?? null],
+    ["Ошибки протокола", bms?.diagnostics?.protocol_errors ?? null],
+    ["Последняя ошибка JBD", bms?.diagnostics?.last_error ?? null],
   ];
 
   return (
@@ -200,67 +218,102 @@ export function EngineeringPage() {
         <button
           type="button"
           onClick={() => setShowSources(!showSources)}
+          title="Показывать источник каждого значения (endpoint и поле backend)"
           className={`inline-flex items-center gap-2 rounded border px-3 py-1.5 text-[11px] font-semibold tracking-[0.08em] uppercase transition-colors ${
             showSources ? "bg-acc/15 border-acc/60 text-acc2" : "bg-panel2 border-line text-mut hover:text-ink"
           }`}
         >
           <span className={`w-[7px] h-[7px] rounded-full ${showSources ? "bg-acc2 led" : "bg-line2"}`} style={{ color: "#2F9BE8" }} />
-          Data sources {showSources ? "ON" : "OFF"}
+          Источники данных: {showSources ? "вкл" : "выкл"}
         </button>
         {note && <span className="text-[11px] text-ok">{note}</span>}
-        <span className="ml-auto num text-[10px] text-mut">Источники: /api/engineering · /api/raw · /api/logs · /api/status · /api/bms</span>
+        <span className="ml-auto num text-[10px] text-mut hidden lg:inline">
+          Источники: /api/engineering · /api/raw · /api/logs · /api/status · /api/bms
+        </span>
       </div>
 
+      {/* происхождение ключевых параметров */}
+      <Card title="Происхождение ключевых параметров" icon={<Wrench size={13} />} delay={0} className="mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <Metric label="Напряжение батареи" value={data?.batteryVoltage} digits={2} unitStr="V" source="/api/data · batteryVoltage" />
+          <Metric label="Мощность батареи" value={data?.bmsPower} digits={1} unitStr="W" source="/api/data · bmsPower" sub={<span>источник: BMS</span>} />
+          <Metric label="Напряжение BMS" value={bms?.voltage} digits={2} unitStr="V" source="/api/bms · voltage" />
+          <Metric label="Мощность PV" value={data?.pvPower} digits={1} unitStr="W" source="/api/data · pvPower" />
+          <Metric label="Мощность нагрузки" value={data?.loadPower} digits={1} unitStr="W" source="/api/data · loadPower" />
+          <Metric label="Заряд (SOC)" value={data?.batterySOC} digits={1} unitStr="%" source="/api/data · batterySOC" />
+        </div>
+        <p className="text-[10.5px] text-mut/70 mt-2.5">
+          Переключатель «Источники данных» добавляет к каждому значению подпись с endpoint и полем backend —
+          для сверки интерфейса с реальным Gateway.
+        </p>
+      </Card>
+
       {/* секции engineering */}
+      <SectionTitle>Разделы GET /api/engineering</SectionTitle>
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
         <SectionCard title="ESP32" icon={<Cpu size={13} />} entries={esp} delay={0} />
         <SectionCard title="Wi-Fi" icon={<Wifi size={13} />} entries={wifiSec} delay={40} />
         <SectionCard title="Modbus" icon={<Radio size={13} />} entries={modbus} delay={80} />
+        <SectionCard title="BMS" icon={<CircuitBoard size={13} />} entries={bmsSec} delay={100} hint="Блок bms отсутствует в /api/engineering, показаны живые данные /api/bms" />
         <SectionCard title="JBD" icon={<Braces size={13} />} entries={jbd} delay={120} />
-        <SectionCard title="Memory" icon={<MemoryStick size={13} />} entries={memory} delay={160} />
+        <SectionCard title="Память" icon={<MemoryStick size={13} />} entries={memory} delay={160} />
 
-        {/* DIAGNOSTICS */}
-        <Card title="Diagnostics" icon={<Shield size={13} />} delay={200}>
+        {/* ДИАГНОСТИКА */}
+        <Card title="Диагностика" icon={<Shield size={13} />} delay={200}>
           {diagRows.map(([k, v]) => (
             <KV key={k} k={k}>
               {typeof v === "number" ? fmt(v, 0) : str(v)}
             </KV>
           ))}
+          {diagSec && diagSec.length > 0 && (
+            <>
+              <div className="text-[9px] tracking-[0.14em] uppercase text-mut mt-2.5 mb-1">Из /api/engineering</div>
+              {diagSec.map(([k, v]) => (
+                <KV key={`d-${k}`} k={k}>
+                  <EntryValue v={v} />
+                </KV>
+              ))}
+            </>
+          )}
           <div className="mt-3">
             <Btn tone="danger" onClick={() => setConfirmReset(true)}>
               <RefreshCw size={12} />
-              Reset Diagnostics
+              Сбросить диагностику
             </Btn>
           </div>
         </Card>
       </div>
 
-      {/* RAW MODBUS */}
+      {/* СЫРЫЕ ДАННЫЕ (RAW MODBUS) */}
       <Card
-        title="Raw Modbus · GET /api/raw"
+        title="Сырые данные · GET /api/raw"
         icon={<FileText size={13} />}
         delay={240}
         className="mt-3"
-        right={<IconBtn title="Обновить (GET /api/raw)" onClick={loadAll} busy={loading}><RefreshCw size={12} /></IconBtn>}
+        right={
+          <IconBtn title="Обновить (GET /api/raw)" onClick={loadAll} busy={loading}>
+            <RefreshCw size={12} />
+          </IconBtn>
+        }
       >
         {rawErr && raw === null ? (
-          <EmptyState title="RAW MODBUS недоступен" hint="GET /api/raw не ответил" compact />
+          <EmptyState title="Сырые данные недоступны" hint="GET /api/raw не ответил" compact />
         ) : raw === null ? (
-          <div className="text-[11.5px] text-mut py-2">Загрузка…</div>
+          <div className="text-[11.5px] text-mut py-2">Ожидание данных...</div>
         ) : (
           <div className="grid lg:grid-cols-2 gap-x-6 gap-y-3">
             <div>
-              <KV k="Slave ID">{fmt(raw.slave_id, 0)}</KV>
-              <KV k="Function">{str(raw.function)}</KV>
-              <KV k="Start register">{fmt(raw.start_register, 0)}</KV>
-              <KV k="Register count">{fmt(raw.register_count, 0)}</KV>
-              <KV k="Last response CRC OK">
+              <KV k="ID устройства (slave)">{fmt(raw.slave_id, 0)}</KV>
+              <KV k="Функция">{str(raw.function)}</KV>
+              <KV k="Начальный регистр">{fmt(raw.start_register, 0)}</KV>
+              <KV k="Количество регистров">{fmt(raw.register_count, 0)}</KV>
+              <KV k="CRC последнего ответа">
                 <OnOffChip value={boolChip(raw.last_response_crc_ok)} />
               </KV>
-              <KV k="Last response length">{fmt(raw.last_response_length, 0)}</KV>
-              <KV k="Last Modbus error">{str(raw.last_modbus_error)}</KV>
+              <KV k="Длина последнего ответа">{fmt(raw.last_response_length, 0)}</KV>
+              <KV k="Последняя ошибка Modbus">{str(raw.last_modbus_error)}</KV>
               <div className="mt-3">
-                <div className="text-[9.5px] tracking-[0.16em] uppercase text-mut mb-1.5">Registers</div>
+                <div className="text-[9.5px] tracking-[0.16em] uppercase text-mut mb-1.5">Регистры</div>
                 {Array.isArray(raw.registers) && raw.registers.length > 0 ? (
                   <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(74px, 1fr))" }}>
                     {(raw.registers as unknown[]).map((r, i) => {
@@ -279,8 +332,8 @@ export function EngineeringPage() {
               </div>
             </div>
             <div className="space-y-3">
-              <HexLine label="Request (hex)" value={raw.request_hex} />
-              <HexLine label="Response (hex)" value={raw.response_hex} />
+              <HexLine label="Запрос (HEX)" value={raw.request_hex} />
+              <HexLine label="Ответ (HEX)" value={raw.response_hex} />
             </div>
             <div className="lg:col-span-2 mt-1">
               <JsonViewer data={raw} maxH={220} />
@@ -289,9 +342,9 @@ export function EngineeringPage() {
         )}
       </Card>
 
-      {/* LOGS */}
+      {/* ЖУРНАЛ */}
       <Card
-        title="Logs · ESP32"
+        title="Журнал · ESP32"
         icon={<ScrollText size={13} />}
         delay={280}
         className="mt-3"
@@ -302,17 +355,17 @@ export function EngineeringPage() {
             </IconBtn>
             <Btn tone="danger" onClick={() => setConfirmClear(true)}>
               <Trash2 size={12} />
-              Clear Logs
+              Очистить журнал
             </Btn>
           </div>
         }
       >
         {logsErr && logs === null ? (
-          <EmptyState title="Логи недоступны" hint="GET /api/logs не ответил" compact />
+          <EmptyState title="Журнал недоступен" hint="GET /api/logs не ответил" compact />
         ) : logs === null ? (
-          <div className="text-[11.5px] text-mut py-2">Загрузка…</div>
+          <div className="text-[11.5px] text-mut py-2">Ожидание данных...</div>
         ) : logs.length === 0 ? (
-          <EmptyState icon={ScrollText} title="Логи пусты" hint="Gateway не вернул записей" compact />
+          <EmptyState icon={ScrollText} title="Журнал пуст" hint="Gateway не вернул записей" compact />
         ) : (
           <div className="max-h-[340px] overflow-y-auto rounded border border-line bg-bg p-2 space-y-[3px]">
             {logs.map((l, i) => {
@@ -338,15 +391,15 @@ export function EngineeringPage() {
 
       {/* инженерный дамп */}
       {eng !== null && (
-        <Card title="Engineering · полный ответ /api/engineering" icon={<Wrench size={13} />} delay={320} className="mt-3">
+        <Card title="Полный ответ /api/engineering" icon={<Wrench size={13} />} delay={320} className="mt-3">
           <JsonViewer data={eng} maxH={300} />
         </Card>
       )}
 
       <ConfirmDialog
         open={confirmClear}
-        title="Clear Logs?"
-        body="Все записи логов на ESP32 Gateway будут удалены (POST /api/logs/clear). Действие необратимо."
+        title="Очистить журнал?"
+        body="Все записи журнала на ESP32 Gateway будут удалены (POST /api/logs/clear). Действие необратимо."
         confirmLabel="Очистить"
         busy={busyClear}
         onCancel={() => setConfirmClear(false)}
@@ -354,8 +407,8 @@ export function EngineeringPage() {
       />
       <ConfirmDialog
         open={confirmReset}
-        title="Reset Diagnostics?"
-        body="Счётчики диагностики (Modbus / JBD / CRC / timeouts) на Gateway будут сброшены (POST /api/diagnostics/reset). После сброса данные будут обновлены с backend."
+        title="Сбросить счётчики диагностики?"
+        body="Счётчики диагностики (Modbus / JBD / CRC / тайм-ауты) на Gateway будут сброшены (POST /api/diagnostics/reset). После сброса данные будут повторно получены с backend."
         confirmLabel="Сбросить"
         busy={busyReset}
         onCancel={() => setConfirmReset(false)}

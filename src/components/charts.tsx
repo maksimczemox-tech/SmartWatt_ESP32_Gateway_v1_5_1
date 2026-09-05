@@ -8,7 +8,7 @@ import {
   YAxis,
 } from "recharts";
 import type { HistoryPoint } from "../types";
-import { DASH, fmtDateTime, normTs, num } from "../utils/format";
+import { DASH, fmtDateTime, normTs, num, ruNum, toBool } from "../utils/format";
 import { EmptyState } from "./ui";
 import { LineChart as LineChartIcon } from "lucide-react";
 
@@ -41,7 +41,7 @@ function ChartTip({ active, payload, label, defs }: TipProps) {
             <span className="w-2 h-2 rounded-[2px]" style={{ backgroundColor: def.color }} />
             <span className="text-mut">{def.name}</span>
             <span className="num text-ink ml-auto pl-3">
-              {n === null ? DASH : `${n.toFixed(def.key === "soc" ? 1 : 1)} ${def.unit}`}
+              {n === null ? DASH : `${ruNum(n, 1)} ${def.unit}`}
             </span>
           </div>
         );
@@ -52,7 +52,9 @@ function ChartTip({ active, payload, label, defs }: TipProps) {
 
 /**
  * График истории. Все точки — только из /api/history.
- * Нет данных => "Нет исторических данных". Одна точка => одна точка.
+ *  - точка с valid = false не рисуется как достоверное измерение;
+ *  - дополнительные точки не создаются, кривая не "дорисовывается";
+ *  - нет данных => "Нет исторических данных".
  */
 export function HistoryChart({
   points,
@@ -63,16 +65,31 @@ export function HistoryChart({
   series: SeriesDef[];
   height?: number;
 }) {
-  const rows = points.map((p) => ({
-    ts: p.ts,
-    pv: series.some((s) => s.key === "pv") ? num(p.pv) : null,
-    batt: series.some((s) => s.key === "batt") ? num(p.batt) : null,
-    load: series.some((s) => s.key === "load") ? num(p.load) : null,
-    soc: series.some((s) => s.key === "soc") ? num(p.soc) : null,
-  }));
+  const rows = points.map((p) => {
+    /* valid === false — измерение недостоверно, не отображаем */
+    const bad = toBool(p.valid) === false;
+    return {
+      ts: p.ts,
+      pv: series.some((s) => s.key === "pv") && !bad ? num(p.pv) : null,
+      batt: series.some((s) => s.key === "batt") && !bad ? num(p.batt) : null,
+      load: series.some((s) => s.key === "load") && !bad ? num(p.load) : null,
+      soc: series.some((s) => s.key === "soc") && !bad ? num(p.soc) : null,
+    };
+  });
 
-  if (rows.length === 0) {
-    return <EmptyState icon={LineChartIcon} title="Нет исторических данных" hint="GET /api/history не вернул samples" compact />;
+  const hasValue = rows.some(
+    (r) => r.pv !== null || r.batt !== null || r.load !== null || r.soc !== null,
+  );
+
+  if (rows.length === 0 || !hasValue) {
+    return (
+      <EmptyState
+        icon={LineChartIcon}
+        title="Нет исторических данных"
+        hint="GET /api/history не вернул достоверных точек измерений"
+        compact
+      />
+    );
   }
 
   const span = rows.length > 1 ? rows[rows.length - 1].ts - rows[0].ts : 0;
@@ -84,7 +101,9 @@ export function HistoryChart({
     if (t === null) return "";
     const d = new Date(t);
     const p = (x: number) => x.toString().padStart(2, "0");
-    return wide ? `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:00` : `${p(d.getHours())}:${p(d.getMinutes())}`;
+    return wide
+      ? `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:00`
+      : `${p(d.getHours())}:${p(d.getMinutes())}`;
   };
 
   return (
@@ -104,7 +123,8 @@ export function HistoryChart({
             minTickGap={48}
           />
           <YAxis
-            width={42}
+            width={44}
+            tickFormatter={(v) => (typeof v === "number" ? v.toLocaleString("ru-RU") : String(v))}
             tick={{ fontSize: 10, fill: "#8A969F", fontFamily: "JetBrains Mono" }}
             stroke="#1A2A35"
             tickLine={false}

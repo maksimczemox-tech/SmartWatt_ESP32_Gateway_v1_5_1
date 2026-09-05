@@ -11,7 +11,7 @@ export type ConnectionStatus =
   | "RECONNECTING"
   | "STALE";
 
-export type SubsystemState = "ONLINE" | "OFFLINE" | "NO_DATA";
+export type SubsystemState = "ONLINE" | "OFFLINE" | "STALE" | "NO_DATA";
 
 /* ---------------- GET /api/data ---------------- */
 

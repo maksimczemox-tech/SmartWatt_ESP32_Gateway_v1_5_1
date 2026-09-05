@@ -1,41 +1,56 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Power, RefreshCw, Router, Server, Wifi, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, Power, RefreshCw, Save, Settings2, Wifi, XCircle } from "lucide-react";
 import { useData } from "../store/DataContext";
-import { Card, KV, Btn, IconBtn, ConfirmDialog, OnOffChip, EmptyState, StatusPill } from "../components/ui";
-import { apiOriginLabel, wsUrl, DATA_SOURCE } from "../services/api";
+import { Card, Btn, ConfirmDialog, EmptyState, KV, SectionTitle } from "../components/ui";
+import { apiOriginLabel, DATA_SOURCE } from "../services/api";
 import type { WifiData } from "../types";
-import { boolChip, dur, fmt, kbytes, str, toBool } from "../utils/format";
+import { firstDef, fmt, str, yesNo } from "../utils/format";
 
-interface Msg {
-  tone: "ok" | "bad";
-  text: string;
+function normalizeWifi(w: WifiData) {
+  return {
+    ssid: str(w.ssid),
+    passwordSaved: yesNo(firstDef(w.password_saved, w.passwordSaved)),
+    connected: yesNo(w.connected),
+    connectedSsid: str(firstDef(w.connected_ssid, w.connectedSsid)),
+    staIp: str(firstDef(w.sta_ip, w.staIp, w.ip)),
+    rssi: w.rssi ?? null,
+    apEnabled: yesNo(firstDef(w.ap_enabled, w.apEnabled)),
+    apSsid: str(firstDef(w.ap_ssid, w.apSsid)),
+    apIp: str(firstDef(w.ap_ip, w.apIp)),
+    apClients: firstDef(w.ap_clients, w.apClients) ?? null,
+    apChannel: firstDef(w.ap_channel, w.apChannel) ?? null,
+    apMaxClients: firstDef(w.ap_max_clients, w.apMaxClients) ?? null,
+    apDhcp: str(firstDef(w.ap_dhcp, w.apDhcp)),
+  };
 }
 
-export function SettingsPage() {
-  const { conn, version, status, fetchWifi, saveWifi, reboot } = useData();
+const inputCls =
+  "w-full bg-panel2 border border-line rounded px-2.5 py-2 text-[12.5px] text-ink placeholder:text-mut/60 outline-none focus:border-acc transition-colors";
 
+export function SettingsPage() {
+  const { fetchWifi, saveWifi, reboot, conn, rebooting, wsOpen, counters, refreshTelemetry } = useData();
   const [wifi, setWifi] = useState<WifiData | null>(null);
-  const [wifiLoading, setWifiLoading] = useState(false);
-  const [wifiFailed, setWifiFailed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+
   const [ssid, setSsid] = useState("");
   const [pass, setPass] = useState("");
   const [confirmWifi, setConfirmWifi] = useState(false);
   const [confirmReboot, setConfirmReboot] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [rebooting, setRebooting] = useState(false);
-  const [msg, setMsg] = useState<Msg | null>(null);
+  const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
 
-  const loadWifi = () => {
-    setWifiLoading(true);
-    setWifiFailed(false);
+  const load = () => {
+    setLoading(true);
+    setFailed(false);
     fetchWifi()
       .then((w) => setWifi(w))
-      .catch(() => setWifiFailed(true))
-      .finally(() => setWifiLoading(false));
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    loadWifi();
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -43,137 +58,155 @@ export function SettingsPage() {
     setSaving(true);
     saveWifi(ssid.trim(), pass)
       .then(() => {
-        setMsg({ tone: "ok", text: "Wi-Fi конфигурация отправлена на Gateway" });
+        setMsg({ tone: "ok", text: "Настройки Wi-Fi отправлены на Gateway" });
         setConfirmWifi(false);
         setPass("");
-        loadWifi();
+        window.setTimeout(load, 1500);
       })
-      .catch(() => setMsg({ tone: "bad", text: "POST /api/wifi не выполнен — Gateway не ответил" }))
+      .catch(() => setMsg({ tone: "err", text: "Не удалось отправить настройки (POST /api/wifi)" }))
       .finally(() => setSaving(false));
   };
 
   const doReboot = () => {
-    setRebooting(true);
-    setMsg(null);
-    reboot()
-      .then(() => setMsg({ tone: "ok", text: "Device restarting... Подключение будет восстановлено автоматически" }))
-      .catch(() => {
-        setMsg({ tone: "bad", text: "POST /api/reboot не выполнен" });
-        setRebooting(false);
-      });
+    setConfirmReboot(false);
+    setMsg({ tone: "ok", text: "Перезагрузка устройства... Ожидание восстановления связи." });
+    void reboot();
   };
 
-  const inputCls =
-    "w-full bg-bg border border-line rounded px-2.5 py-[7px] text-[12.5px] text-ink placeholder:text-mut/50 outline-none focus:border-acc transition-colors";
+  const w = wifi ? normalizeWifi(wifi) : null;
 
   return (
     <div>
-      <div className="grid lg:grid-cols-2 gap-3">
-        {/* CONNECTION */}
-        <Card title="Подключение · Connection" icon={<Server size={13} />} delay={0}>
-          <KV k="Статус">
-            <StatusPill status={conn} compact />
-          </KV>
-          <KV k="HTTP API">{apiOriginLabel()}</KV>
-          <KV k="WebSocket (порт 81)">{wsUrl()}</KV>
-          <KV k="Data source">{DATA_SOURCE.toUpperCase()}</KV>
-          <p className="text-[10.5px] text-mut/80 leading-relaxed mt-2.5">
-            Адрес Gateway задаётся переменной <span className="num text-mut">VITE_GATEWAY_URL</span>. Если она не задана,
-            используются same-origin запросы — фронтенд открывается непосредственно с ESP32.
-          </p>
-        </Card>
-
-        {/* DEVICE */}
-        <Card title="Устройство" icon={<Server size={13} />} delay={50}>
-          <KV k="Device">{str(status?.device)}</KV>
-          <KV k="Firmware version">
-            {str(version?.firmware_version) !== "—" ? str(version?.firmware_version) : str(version?.version)}
-          </KV>
-          <KV k="Uptime">{dur(status?.uptime_ms)}</KV>
-          <KV k="Free heap">{kbytes(status?.free_heap)}</KV>
-          <KV k="Min free heap">{kbytes(status?.min_free_heap)}</KV>
-          <div className="mt-3.5 flex items-center gap-2.5">
-            <Btn tone="danger" onClick={() => setConfirmReboot(true)}>
-              <Power size={12} />
-              Reboot Device
-            </Btn>
-            {rebooting && <span className="text-[11px] text-warn blink-soft">Device restarting...</span>}
+      {/* СВЯЗЬ */}
+      <Card title="Связь с Gateway" icon={<Settings2 size={13} />} delay={0}>
+        <div className="grid md:grid-cols-2 gap-x-8">
+          <div>
+            <SectionTitle>Подключение</SectionTitle>
+            <KV k="Адрес Gateway">{apiOriginLabel()}</KV>
+            <KV k="Источник данных">{DATA_SOURCE === "live" ? "LIVE (реальные данные)" : DATA_SOURCE}</KV>
+            <KV k="WebSocket (порт 81)">
+              {wsOpen ? (
+                <span className="text-ok">открыт</span>
+              ) : (
+                <span className="text-mut">закрыт · опрос HTTP активен</span>
+              )}
+            </KV>
+            <KV k="Статус соединения">
+              {conn === "ONLINE"
+                ? "В СЕТИ"
+                : conn === "OFFLINE"
+                  ? "НЕТ СВЯЗИ"
+                  : conn === "STALE"
+                    ? "ДАННЫЕ УСТАРЕЛИ"
+                    : conn === "RECONNECTING"
+                      ? "ВОССТАНОВЛЕНИЕ СВЯЗИ"
+                      : "ПОДКЛЮЧЕНИЕ"}
+            </KV>
           </div>
-        </Card>
-      </div>
+          <div>
+            <SectionTitle>Счётчики интерфейса (браузер)</SectionTitle>
+            <KV k="HTTP-запросы интерфейса">{counters.requests}</KV>
+            <KV k="Ошибки HTTP интерфейса">{counters.errors}</KV>
+            <p className="text-[10.5px] text-mut/70 leading-relaxed mt-2">
+              Это счётчики запросов, выполненных интерфейсом браузера. Диагностика ESP32
+              (Modbus / JBD / CRC) отображается в инженерном режиме.
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-3 pt-3 border-t border-line/60 flex-wrap">
+          <Btn onClick={() => void refreshTelemetry()}>
+            <RefreshCw size={12} />
+            Обновить телеметрию
+          </Btn>
+          <Btn tone="danger" onClick={() => setConfirmReboot(true)}>
+            <Power size={12} />
+            Перезагрузить устройство
+          </Btn>
+          {rebooting && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] text-warn">
+              <Loader2 size={12} className="spin" />
+              {conn === "ONLINE" ? "Устройство снова в сети" : "Перезагрузка устройства... Восстановление связи..."}
+            </span>
+          )}
+        </div>
+        <p className="text-[10.5px] text-mut/70 mt-2.5 leading-relaxed">
+          Адрес Gateway задаётся переменной окружения <span className="num text-mut">VITE_GATEWAY_URL</span>.
+          Если переменная не задана, запросы выполняются на тот же адрес, с которого открыт интерфейс
+          (фронтенд на самом ESP32).
+        </p>
+      </Card>
 
       {/* WI-FI */}
       <Card
         title="Wi-Fi"
         icon={<Wifi size={13} />}
-        delay={100}
+        delay={60}
         className="mt-3"
-        right={<IconBtn title="Обновить (GET /api/wifi)" onClick={loadWifi} busy={wifiLoading}><RefreshCw size={12} /></IconBtn>}
+        right={
+          <Btn onClick={load} busy={loading}>
+            <RefreshCw size={12} />
+            Обновить
+          </Btn>
+        }
       >
-        {wifiFailed ? (
-          <EmptyState title="Wi-Fi данные недоступны" hint="GET /api/wifi не ответил" compact />
-        ) : wifi === null ? (
-          <div className="text-[11.5px] text-mut py-3">Загрузка…</div>
+        {failed ? (
+          <EmptyState title="Данные Wi-Fi недоступны" hint="GET /api/wifi не ответил" compact />
+        ) : !w ? (
+          <div className="flex items-center gap-2 text-[11.5px] text-mut py-3">
+            <Loader2 size={13} className="spin" />
+            Ожидание данных...
+          </div>
         ) : (
-          <div className="grid lg:grid-cols-2 gap-x-6">
+          <div className="grid md:grid-cols-2 gap-x-8">
             <div>
-              <KV k="SSID">{str(wifi.ssid)}</KV>
-              <KV k="Password saved">
-                {toBool(wifi.password_saved ?? wifi.passwordSaved) === null ? "—" : toBool(wifi.password_saved ?? wifi.passwordSaved) ? "Yes" : "No"}
-              </KV>
-              <KV k="Connected">
-                <OnOffChip value={boolChip(wifi.connected)} />
-              </KV>
-              <KV k="Connected SSID">{str(wifi.connected_ssid ?? wifi.connectedSsid)}</KV>
-              <KV k="STA IP">{str(wifi.sta_ip ?? wifi.staIp ?? wifi.ip)}</KV>
-              <KV k="RSSI">{fmt(wifi.rssi, 0)} dBm</KV>
+              <SectionTitle>Станция (STA)</SectionTitle>
+              <KV k="Имя сети (SSID)">{w.ssid}</KV>
+              <KV k="Пароль сохранён">{w.passwordSaved}</KV>
+              <KV k="Подключено">{w.connected}</KV>
+              <KV k="Подключённая сеть">{w.connectedSsid}</KV>
+              <KV k="IP-адрес">{w.staIp}</KV>
+              <KV k="Уровень сигнала (RSSI)">{w.rssi === null ? "—" : `${fmt(w.rssi, 0)} dBm`}</KV>
             </div>
             <div>
-              <KV k="AP enabled">
-                <OnOffChip value={boolChip(wifi.ap_enabled ?? wifi.apEnabled)} />
-              </KV>
-              <KV k="AP SSID">{str(wifi.ap_ssid ?? wifi.apSsid)}</KV>
-              <KV k="AP IP">{str(wifi.ap_ip ?? wifi.apIp)}</KV>
-              <KV k="AP clients">{fmt(wifi.ap_clients ?? wifi.apClients, 0)}</KV>
-              <KV k="AP channel">{fmt(wifi.ap_channel ?? wifi.apChannel, 0)}</KV>
-              <KV k="AP max clients">{fmt(wifi.ap_max_clients ?? wifi.apMaxClients, 0)}</KV>
-              <KV k="AP DHCP">
-                {(() => {
-                  const v = wifi.ap_dhcp ?? wifi.apDhcp;
-                  const b = toBool(v);
-                  if (b !== null) return b ? "ON" : "OFF";
-                  return str(v);
-                })()}
-              </KV>
+              <SectionTitle>Точка доступа (AP)</SectionTitle>
+              <KV k="Точка доступа">{w.apEnabled}</KV>
+              <KV k="Имя сети AP">{w.apSsid}</KV>
+              <KV k="IP точки доступа">{w.apIp}</KV>
+              <KV k="Клиенты">{fmt(w.apClients, 0)}</KV>
+              <KV k="Канал">{fmt(w.apChannel, 0)}</KV>
+              <KV k="Максимум клиентов">{fmt(w.apMaxClients, 0)}</KV>
+              <KV k="DHCP">{w.apDhcp}</KV>
             </div>
           </div>
         )}
+        <p className="text-[10.5px] text-mut/70 mt-3 leading-relaxed">
+          Пароль Wi-Fi никогда не отображается: если backend не возвращает его, интерфейс показывает
+          только факт сохранённого пароля.
+        </p>
 
-        {/* форма изменения */}
-        <div className="mt-4 pt-3.5 border-t border-line">
-          <div className="flex items-center gap-2 mb-2.5">
-            <Router size={13} className="text-mut" />
-            <span className="text-[10px] tracking-[0.16em] uppercase text-mut font-semibold">Изменить Wi-Fi (POST /api/wifi)</span>
-          </div>
+        {/* смена Wi-Fi */}
+        <div className="mt-3 pt-3 border-t border-line/60">
+          <SectionTitle>Изменить подключение</SectionTitle>
           <div className="grid sm:grid-cols-2 gap-2.5 max-w-xl">
-            <input
-              className={inputCls}
-              placeholder="SSID сети"
-              value={ssid}
-              onChange={(e) => setSsid(e.target.value)}
-              autoComplete="off"
-            />
-            <input
-              className={inputCls}
-              type="password"
-              placeholder="Пароль (никогда не отображается)"
-              value={pass}
-              onChange={(e) => setPass(e.target.value)}
-              autoComplete="new-password"
-            />
+            <div>
+              <label className="text-[10px] uppercase tracking-[0.14em] text-mut block mb-1">Имя сети (SSID)</label>
+              <input className={inputCls} value={ssid} onChange={(e) => setSsid(e.target.value)} placeholder="Имя сети" />
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-[0.14em] text-mut block mb-1">Пароль</label>
+              <input
+                className={inputCls}
+                type="password"
+                value={pass}
+                onChange={(e) => setPass(e.target.value)}
+                placeholder="Пароль Wi-Fi"
+                autoComplete="new-password"
+              />
+            </div>
           </div>
           <div className="flex items-center gap-3 mt-2.5">
             <Btn tone="primary" disabled={ssid.trim() === ""} onClick={() => setConfirmWifi(true)}>
+              <Save size={12} />
               Сохранить Wi-Fi
             </Btn>
             {msg && (
@@ -188,15 +221,9 @@ export function SettingsPage() {
 
       <ConfirmDialog
         open={confirmWifi}
-        title="Изменить Wi-Fi?"
-        body={
-          <>
-            Gateway получит новую конфигурацию Wi-Fi: SSID <span className="num text-ink">{ssid}</span>. Пароль не
-            отображается и не сохраняется в интерфейсе. Устройство может переподключиться — соединение временно прервётся.
-          </>
-        }
-        confirmLabel="Применить"
-        tone="primary"
+        title="Сохранить настройки Wi-Fi?"
+        body={`Gateway получит новую конфигурацию Wi-Fi: сеть «${ssid.trim()}». Пароль не отображается и не сохраняется в интерфейсе. Устройство может переподключиться — соединение временно прервётся.`}
+        confirmLabel="Сохранить"
         busy={saving}
         onCancel={() => setConfirmWifi(false)}
         onConfirm={doSaveWifi}
@@ -204,10 +231,9 @@ export function SettingsPage() {
 
       <ConfirmDialog
         open={confirmReboot}
-        title="Confirm reboot?"
-        body="ESP32 Gateway будет перезагружен. Телеметрия станет недоступна на время перезагрузки, затем соединение восстановится автоматически (RECONNECTING → ONLINE)."
-        confirmLabel="Reboot"
-        busy={rebooting}
+        title="Перезагрузить устройство?"
+        body="ESP32 Gateway будет перезагружен (POST /api/reboot). Телеметрия станет недоступна на время перезагрузки, затем связь восстановится автоматически."
+        confirmLabel="Перезагрузить"
         onCancel={() => setConfirmReboot(false)}
         onConfirm={doReboot}
       />
