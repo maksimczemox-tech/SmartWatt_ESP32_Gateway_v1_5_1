@@ -56,7 +56,7 @@ export function BmsPage() {
             Защита (код): <span className="num text-ink">{fmt(bms?.protection, 0)}</span>
           </span>
           <span className="truncate">
-            {str(bms?.protection_text) !== "—" ? str(bms?.protection_text) : "Unknown protection / fault"}
+            {str(bms?.protection_text) !== "—" ? str(bms?.protection_text) : "Неизвестная защита / неисправность"}
           </span>
         </div>
       </Card>
@@ -102,7 +102,7 @@ export function BmsPage() {
             <KV k="Режим работы">{str(bms?.operation)}</KV>
             <KV k="Код защиты">{fmt(bms?.protection, 0)}</KV>
             <KV k="Состояние защиты">
-              {str(bms?.protection_text) !== "—" ? str(bms?.protection_text) : "Unknown protection / fault"}
+              {str(bms?.protection_text) !== "—" ? str(bms?.protection_text) : "Неизвестная защита / неисправность"}
             </KV>
           </Card>
 

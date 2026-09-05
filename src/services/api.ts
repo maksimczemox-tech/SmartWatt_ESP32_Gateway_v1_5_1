@@ -1,7 +1,7 @@
 /**
  * HTTP-клиент существующего SmartWatt ESP32 Gateway.
  * Новые endpoint'ы не придумываются — только реальные маршруты Gateway:
- *   GET  /api/health /api/version /api/data /api/history /api/status /api/bms
+ *   GET  /api/health /api/version /api/data /api/status /api/bms
  *        /api/raw /api/config /api/engineering /api/logs /api/wifi
  *   POST /api/reboot /api/wifi /api/logs/clear /api/diagnostics/reset
  *

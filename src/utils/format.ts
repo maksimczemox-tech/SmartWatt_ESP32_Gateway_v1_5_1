@@ -166,6 +166,50 @@ export function age(ms: unknown): string {
   return `${Math.floor(n / 60000)} мин`;
 }
 
+/** "X ч XX мин" из дробного числа часов; null → "—". */
+export function hm(hours: number | null): string {
+  if (hours === null || !Number.isFinite(hours)) return DASH;
+  const totalMin = Math.round(hours * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h <= 0) return `${m} мин`;
+  if (h >= 1000) return `> 999 ч`;
+  return `${h} ч ${m.toString().padStart(2, "0")} мин`;
+}
+
+/** Градусы в русской нотации: "213,4°". */
+export function deg(v: number | null, digits = 0): string {
+  if (v === null || !Number.isFinite(v)) return DASH;
+  return `${ruNum(v, digits)}°`;
+}
+
+/** Перевод режима заряда контроллера на русский (только уровень UI). */
+export function chargeStateRu(v: unknown): string {
+  if (v === null || v === undefined) return DASH;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return DASH;
+    if (v === 0) return "НЕТ ЗАРЯДА";
+    return String(Math.round(v));
+  }
+  const s = String(v).trim().toUpperCase();
+  if (s === "") return DASH;
+  const map: Record<string, string> = {
+    "MPPT": "MPPT",
+    "EQUALIZING": "ВЫРАВНИВАНИЕ",
+    "EQUALISING": "ВЫРАВНИВАНИЕ",
+    "BOOST": "УСКОРЕННЫЙ ЗАРЯД",
+    "FLOAT": "ПОДДЕРЖИВАЮЩИЙ ЗАРЯД",
+    "CURRENT LIMIT": "ОГРАНИЧЕНИЕ ТОКА",
+    "CURRENT_LIMIT": "ОГРАНИЧЕНИЕ ТОКА",
+    "NO CHARGE": "НЕТ ЗАРЯДА",
+    "NO_CHARGE": "НЕТ ЗАРЯДА",
+    "OFF": "НЕТ ЗАРЯДА",
+  };
+  if (map[s]) return map[s];
+  if (/^-?\d+(\.\d+)?$/.test(s)) return chargeStateRu(Number(s));
+  return "НЕИЗВЕСТНО";
+}
+
 export function clampPct(v: unknown): number | null {
   const n = num(v);
   if (n === null) return null;

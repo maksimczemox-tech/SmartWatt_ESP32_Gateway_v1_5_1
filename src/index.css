@@ -192,6 +192,62 @@ body {
   letter-spacing: -0.01em;
 }
 
+/* ---- энергетическая сцена ---- */
+@keyframes dash-run {
+  to {
+    stroke-dashoffset: -22;
+  }
+}
+.flow-anim {
+  animation: dash-run var(--dur, 1s) linear infinite;
+}
+
+@keyframes ray-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ray-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ray-rotate 36s linear infinite;
+}
+
+@keyframes sun-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+.sun-pulse {
+  animation: sun-glow-pulse 3.4s ease-in-out infinite;
+}
+
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+.twinkle {
+  animation: star-twinkle 3.8s ease-in-out infinite;
+}
+
+.svg-label {
+  font-family: var(--font-sans);
+  letter-spacing: 0.08em;
+}
+.svg-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .hexblock {
   font-family: var(--font-mono);
   word-break: break-all;

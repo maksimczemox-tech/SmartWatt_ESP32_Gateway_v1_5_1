@@ -114,6 +114,7 @@ export function EngineeringPage() {
     fetchEngineering,
     fetchRaw,
     fetchLogs,
+    fetchConfig,
     clearLogs,
     resetDiagnostics,
   } = useData();
@@ -121,6 +122,7 @@ export function EngineeringPage() {
   const [eng, setEng] = useState<EngineeringData | null>(null);
   const [raw, setRaw] = useState<RawData | null>(null);
   const [logs, setLogs] = useState<LogEntry[] | null>(null);
+  const [cfg, setCfg] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [rawErr, setRawErr] = useState(false);
   const [logsErr, setLogsErr] = useState(false);
@@ -134,12 +136,13 @@ export function EngineeringPage() {
     setLoading(true);
     setRawErr(false);
     setLogsErr(false);
-    Promise.allSettled([fetchEngineering(), fetchRaw(), fetchLogs()]).then((res) => {
+    Promise.allSettled([fetchEngineering(), fetchRaw(), fetchLogs(), fetchConfig()]).then((res) => {
       setEng(res[0].status === "fulfilled" ? res[0].value : null);
       if (res[1].status === "fulfilled") setRaw(res[1].value);
       else setRawErr(true);
       if (res[2].status === "fulfilled") setLogs(res[2].value);
       else setLogsErr(true);
+      setCfg(res[3].status === "fulfilled" ? res[3].value : null);
       setLoading(false);
     });
   };
@@ -393,6 +396,13 @@ export function EngineeringPage() {
       {eng !== null && (
         <Card title="Полный ответ /api/engineering" icon={<Wrench size={13} />} delay={320} className="mt-3">
           <JsonViewer data={eng} maxH={300} />
+        </Card>
+      )}
+
+      {/* конфигурация */}
+      {cfg !== null && (
+        <Card title="Конфигурация · GET /api/config" icon={<Braces size={13} />} delay={340} className="mt-3">
+          <JsonViewer data={cfg} maxH={260} />
         </Card>
       )}
 

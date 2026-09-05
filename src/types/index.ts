@@ -1,7 +1,11 @@
 /**
- * Строгие типы ответов SmartWatt ESP32 Gateway v1.6.0.
+ * Строгие типы ответов SmartWatt ESP32 Gateway v1.6.x.
  * Все телеметрические поля опциональны и nullable:
  * отсутствующее значение отображается как "—", никогда не подменяется числом.
+ *
+ * ВАЖНО: в прошивке v1.6.x отсутствует endpoint /api/history —
+ * фронтенд его не запрашивает. История формируется только из реально
+ * полученных WebSocket/API samples (локальный ring buffer).
  */
 
 export type ConnectionStatus =
@@ -16,8 +20,8 @@ export type SubsystemState = "ONLINE" | "OFFLINE" | "STALE" | "NO_DATA";
 /* ---------------- GET /api/data ---------------- */
 
 export interface SystemData {
-  online?: boolean | number | null;
-  wifi?: boolean | number | null;
+  online?: boolean | null;
+  wifi?: boolean | null;
   ip?: string | null;
   timestamp?: number | null;
   dataAgeMs?: number | null;
@@ -40,19 +44,22 @@ export interface SystemData {
   loadVoltage?: number | null;
   loadCurrent?: number | null;
   loadPower?: number | null;
-  loadState?: boolean | number | string | null;
+  loadState?: boolean | null;
   maxLoadCurrent?: number | null;
   maxLoadPower?: number | null;
 
   controllerTemp?: number | null;
   chargeState?: number | string | null;
 
-  fault?: boolean | number | null;
+  fault?: boolean | null;
   faultCode?: number | null;
   faultDescription?: string | null;
 
   dailyChargeAh?: number | null;
   dailyLoadAh?: number | null;
+  /** Только если прошивка реально предоставляет эти поля. */
+  dailyChargeWh?: number | null;
+  dailyLoadWh?: number | null;
 
   totalChargeAh?: number | null;
   totalLoadAh?: number | null;
@@ -64,7 +71,7 @@ export interface SystemData {
   fullCharges?: number | null;
   overDischarges?: number | null;
 
-  bmsOnline?: boolean | number | null;
+  bmsOnline?: boolean | null;
   bmsDataAgeMs?: number | null;
   bmsVoltage?: number | null;
   bmsCurrent?: number | null;
@@ -85,9 +92,9 @@ export interface SystemData {
   bmsProtectionText?: string | null;
 
   bmsFetStatus?: number | null;
-  bmsChargeFet?: boolean | number | null;
-  bmsDischargeFet?: boolean | number | null;
-  bmsBalancing?: boolean | number | null;
+  bmsChargeFet?: boolean | null;
+  bmsDischargeFet?: boolean | null;
+  bmsBalancing?: boolean | null;
   bmsOperation?: number | string | null;
 
   bmsCells?: (number | null)[] | null;
@@ -103,17 +110,17 @@ export interface JbdDiagnostics {
   timeouts?: number | null;
   crc_errors?: number | null;
   protocol_errors?: number | null;
-  basic_ok?: boolean | number | null;
-  cells_ok?: boolean | number | null;
+  basic_ok?: boolean | null;
+  cells_ok?: boolean | null;
   last_error?: string | number | null;
-  last_crc_ok?: boolean | number | null;
+  last_crc_ok?: boolean | null;
   last_response_length?: number | null;
   last_request_hex?: string | null;
   last_response_hex?: string | null;
 }
 
 export interface BmsData {
-  online?: boolean | number | null;
+  online?: boolean | null;
   data_age_ms?: number | null;
 
   voltage?: number | null;
@@ -141,9 +148,9 @@ export interface BmsData {
 
   operation?: number | string | null;
 
-  charge_fet?: boolean | number | null;
-  discharge_fet?: boolean | number | null;
-  balancing?: boolean | number | null;
+  charge_fet?: boolean | null;
+  discharge_fet?: boolean | null;
+  balancing?: boolean | null;
 
   diagnostics?: JbdDiagnostics | null;
 }
@@ -152,20 +159,23 @@ export interface BmsData {
 
 export interface StatusData {
   device?: string | null;
-  online?: boolean | number | null;
-  wifi?: boolean | number | null;
+  online?: boolean | null;
+  wifi?: boolean | null;
   connected_ssid?: string | null;
   rssi?: number | null;
   sta_ip?: string | null;
 
-  ap_enabled?: boolean | number | null;
+  ap_enabled?: boolean | null;
   ap_ip?: string | null;
 
+  /** Реальное состояние Modbus-контроллера из прошивки (если предоставляется). */
+  controller_online?: boolean | null;
+  modbus_data_age_ms?: number | null;
   modbus_errors?: number | null;
   modbus_retries?: number | null;
   last_modbus_error?: string | number | null;
 
-  bms_online?: boolean | number | null;
+  bms_online?: boolean | null;
   bms_data_age_ms?: number | null;
 
   bms_requests?: number | null;
@@ -188,38 +198,23 @@ export interface VersionData {
   fw_version?: string | null;
   device?: string | null;
   build?: string | null;
-  [key: string]: unknown;
 }
 
 export interface HealthData {
-  ok?: boolean | number | null;
+  ok?: boolean | null;
   status?: string | null;
   uptime_ms?: number | null;
   free_heap?: number | null;
   version?: string | null;
-  [key: string]: unknown;
 }
-
-/* ---------------- GET /api/history ---------------- */
-
-export interface HistoryPoint {
-  ts: number;
-  pv?: number | null;
-  batt?: number | null;
-  load?: number | null;
-  soc?: number | null;
-  valid?: boolean | number | null;
-}
-
-export type HistoryRange = "default" | "7d";
 
 /* ---------------- GET /api/wifi ---------------- */
 
 export interface WifiData {
   ssid?: string | null;
-  password_saved?: boolean | number | null;
-  passwordSaved?: boolean | number | null;
-  connected?: boolean | number | null;
+  password_saved?: boolean | null;
+  passwordSaved?: boolean | null;
+  connected?: boolean | null;
   connected_ssid?: string | null;
   connectedSsid?: string | null;
   sta_ip?: string | null;
@@ -227,8 +222,8 @@ export interface WifiData {
   ip?: string | null;
   rssi?: number | null;
 
-  ap_enabled?: boolean | number | null;
-  apEnabled?: boolean | number | null;
+  ap_enabled?: boolean | null;
+  apEnabled?: boolean | null;
   ap_ssid?: string | null;
   apSsid?: string | null;
   ap_ip?: string | null;
@@ -239,10 +234,8 @@ export interface WifiData {
   apChannel?: number | null;
   ap_max_clients?: number | null;
   apMaxClients?: number | null;
-  ap_dhcp?: boolean | number | string | null;
-  apDhcp?: boolean | number | string | null;
-
-  [key: string]: unknown;
+  ap_dhcp?: string | boolean | number | null;
+  apDhcp?: string | boolean | number | null;
 }
 
 /* ---------------- GET /api/raw ---------------- */
@@ -253,12 +246,11 @@ export interface RawData {
   start_register?: number | null;
   register_count?: number | null;
   registers?: unknown;
-  last_response_crc_ok?: boolean | number | null;
+  last_response_crc_ok?: boolean | null;
   last_response_length?: number | null;
   last_modbus_error?: string | number | null;
   request_hex?: string | null;
   response_hex?: string | null;
-  [key: string]: unknown;
 }
 
 /* ---------------- GET /api/logs ---------------- */
@@ -269,9 +261,29 @@ export interface LogEntry {
   level?: string | null;
 }
 
-/* ---------------- GET /api/engineering ---------------- */
+/* ---------------- GET /api/engineering /api/config ---------------- */
 
 export type EngineeringData = Record<string, unknown>;
+
+/* ---------------- локальный ring buffer samples (WebSocket / опрос) ---------------- */
+
+/**
+ * Одна точка истории, полученная от Gateway (WebSocket-фрейм или ответ /api/data).
+ * Фронтенд точки НЕ создаёт: только сохраняет реально полученные фреймы.
+ *   pv   — мощность PV (измерено)
+ *   batt — мощность BMS: >0 заряд, <0 разряд (измерено)
+ *   load — расчетная нагрузка max(0, pv − batt) (расчет)
+ *   soc  — заряд батареи (измерено)
+ *   valid — признак достоверности фрейма
+ */
+export interface SamplePoint {
+  ts: number;
+  pv: number | null;
+  batt: number | null;
+  load: number | null;
+  soc: number | null;
+  valid: boolean;
+}
 
 /* ---------------- store ---------------- */
 

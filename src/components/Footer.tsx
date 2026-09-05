@@ -50,7 +50,7 @@ export function Footer() {
 
         <span className="ml-auto hidden sm:inline-flex items-center gap-1.5 text-[9px] tracking-[0.16em] uppercase text-mut/70">
           <span className="w-[6px] h-[6px] rounded-full bg-ok led" style={{ color: "#70D900" }} />
-          Источник данных: {DATA_SOURCE} · ESP32 Gateway
+          Источник данных: реальные данные ({DATA_SOURCE}) · ESP32 Gateway
         </span>
       </div>
     </footer>

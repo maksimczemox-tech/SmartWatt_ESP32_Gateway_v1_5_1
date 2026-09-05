@@ -3,9 +3,13 @@
  *
  * Цепочка данных:
  *   ESP32 → HTTP API / WebSocket → Validation (services/validation.ts)
- *         → Normalized Store (этот модуль) → React UI
+ *         → Normalized Store (этот модуль) → Расчетные показатели → React UI
  *
  * UI-компоненты не обращаются к API и не обрабатывают сырые ответы.
+ *
+ * ИСТОРИЯ: прошивка v1.6.x не имеет /api/history. Store ведёт локальный
+ * ring buffer (до 3600) из РЕАЛЬНО полученных фреймов WebSocket и ответов
+ * /api/data. Точки не создаются, не интерполируются и не дублируются.
  */
 
 import {
@@ -22,10 +26,9 @@ import {
   type BmsData,
   type ConnectionStatus,
   type EngineeringData,
-  type HistoryPoint,
-  type HistoryRange,
   type LogEntry,
   type RawData,
+  type SamplePoint,
   type SessionCounters,
   type StatusData,
   type SubsystemState,
@@ -38,25 +41,29 @@ import { GatewaySocket } from "../services/websocket";
 import {
   extractTelemetry,
   isRecord,
-  normalizeHistory,
   normalizeLogs,
   validateBmsData,
+  validateRawData,
   validateStatusData,
   validateSystemData,
+  validateVersionData,
+  validateWifiData,
 } from "../services/validation";
-import { normTs, num, toBool } from "../utils/format";
+import { num, toBool } from "../utils/format";
+import { estimatedLoadPower } from "../utils/energy";
 import { useNow } from "../hooks/useNow";
 
 /**
  * Единая конфигурационная константа актуальности данных.
  * Данные старше этого возраста считаются устаревшими (ДАННЫЕ УСТАРЕЛИ).
- * Используется и для Gateway, и для BMS — порог не дублируется.
+ * Используется для Gateway, телеметрии, BMS и Modbus — порог не дублируется.
  */
 export const STALE_MS = 30_000;
 
 const DATA_POLL_MS = 5_000;
 const BMS_POLL_MS = 8_000;
 const STATUS_POLL_MS = 10_000;
+const MAX_SAMPLES = 3_600;
 
 function mergeTelemetry(prev: SystemData | null, next: SystemData): SystemData {
   /* Полный фрейм (есть timestamp/dataAgeMs) заменяет состояние целиком. */
@@ -68,6 +75,12 @@ function mergeTelemetry(prev: SystemData | null, next: SystemData): SystemData {
     if (v !== undefined && v !== null) out[k] = v;
   }
   return out as SystemData;
+}
+
+function normTs(v: unknown): number | null {
+  const n = num(v);
+  if (n === null || n <= 0) return null;
+  return n < 1e12 ? n * 1000 : n;
 }
 
 /* ---------------- контекст ---------------- */
@@ -88,11 +101,18 @@ interface DataContextValue {
   rebooting: boolean;
   showSources: boolean;
   counters: SessionCounters;
+
+  /** Состояния подсистем (раздельно, по реальным полям). */
+  telemetryState: SubsystemState;
   bmsState: SubsystemState;
   controllerState: SubsystemState;
 
-  fetchHistory: (range: HistoryRange) => Promise<HistoryPoint[]>;
+  /** Реально полученные samples (ring buffer). Момент запуска интерфейса. */
+  samples: SamplePoint[];
+  sessionStart: number;
+
   fetchEngineering: () => Promise<EngineeringData>;
+  fetchConfig: () => Promise<Record<string, unknown>>;
   fetchLogs: () => Promise<LogEntry[]>;
   clearLogs: () => Promise<void>;
   fetchRaw: () => Promise<RawData>;
@@ -116,12 +136,48 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [receivedAt, setReceivedAt] = useState<number | null>(null);
   const [rebooting, setRebooting] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [samples, setSamples] = useState<SamplePoint[]>([]);
+  const [sessionStart] = useState<number>(() => Date.now());
 
   const failsRef = useRef(0);
   const everOnlineRef = useRef(false);
   const versionDoneRef = useRef(false);
 
   const now = useNow(1000);
+
+  /* ---------------- применение телеметрии (HTTP и WS) ---------------- */
+
+  const applyTelemetry = useCallback((frame: SystemData) => {
+    const received = Date.now();
+    setData((prev) => mergeTelemetry(prev, frame));
+    setReceivedAt(received);
+
+    /* ring buffer: сохраняем только реально полученный фрейм */
+    const ts = normTs(frame.timestamp) ?? received;
+    const pv = frame.pvPower ?? null;
+    const batt = frame.bmsPower ?? null;
+    const soc = frame.batterySOC ?? frame.bmsSOC ?? null;
+    const load = estimatedLoadPower(pv, batt);
+    const valid = toBool(frame.online) !== false;
+    setSamples((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1].ts >= ts) return prev;
+      const next = [...prev, { ts, pv, batt, load, soc, valid }];
+      return next.length > MAX_SAMPLES ? next.slice(next.length - MAX_SAMPLES) : next;
+    });
+
+    failsRef.current = 0;
+    everOnlineRef.current = true;
+    setRebooting(false);
+    setRawConn("ONLINE");
+
+    if (!versionDoneRef.current) {
+      versionDoneRef.current = true;
+      api
+        .get<unknown>("/api/version")
+        .then((v) => setVersion(validateVersionData(v)))
+        .catch(() => setVersion(null));
+    }
+  }, []);
 
   const applyHttpFailure = useCallback(() => {
     failsRef.current += 1;
@@ -132,54 +188,36 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setRawConn(failsRef.current >= 3 ? "OFFLINE" : "RECONNECTING");
   }, []);
 
-  const applyDataReceived = useCallback(() => {
-    failsRef.current = 0;
-    everOnlineRef.current = true;
-    setRebooting(false);
-    setRawConn("ONLINE");
-    setReceivedAt(Date.now());
-  }, []);
+  /* ---------------- polling (HTTP: первичные данные и fallback) ---------------- */
 
   const pollData = useCallback(async () => {
     try {
-      const d = await api.get<unknown>("/api/data");
-      const validated = validateSystemData(d);
-      if (validated === null) throw new Error("Некорректный ответ /api/data");
-      setData((prev) => mergeTelemetry(prev, validated));
-      applyDataReceived();
-      if (!versionDoneRef.current) {
-        versionDoneRef.current = true;
-        api
-          .get<VersionData>("/api/version")
-          .then((v) => setVersion(v))
-          .catch(() => undefined);
-      }
+      const res = await api.get<unknown>("/api/data");
+      const frame = validateSystemData(res);
+      if (frame === null) throw new Error("Некорректные данные /api/data");
+      applyTelemetry(frame);
     } catch {
       applyHttpFailure();
     }
-  }, [applyHttpFailure, applyDataReceived]);
+  }, [applyTelemetry, applyHttpFailure]);
 
   const pollBms = useCallback(async () => {
     try {
-      const b = await api.get<unknown>("/api/bms");
-      const validated = validateBmsData(b);
-      if (validated !== null) setBms(validated);
+      const res = await api.get<unknown>("/api/bms");
+      setBms(validateBmsData(res));
     } catch {
-      /* предыдущее значение сохраняется; статус определяется по свежести */
+      /* предыдущее значение сохраняется; статус — через pollData */
     }
   }, []);
 
   const pollStatus = useCallback(async () => {
     try {
-      const s = await api.get<unknown>("/api/status");
-      const validated = validateStatusData(s);
-      if (validated !== null) setStatus(validated);
+      const res = await api.get<unknown>("/api/status");
+      setStatus(validateStatusData(res));
     } catch {
       /* noop */
     }
   }, []);
-
-  /* ---------------- polling (HTTP: первичное состояние и fallback) ---------------- */
 
   useEffect(() => {
     void pollData();
@@ -202,20 +240,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     sock.onState = (s) => setWsOpen(s === "open");
     sock.onMessage = (payload) => {
       const frame = extractTelemetry(payload);
-      if (frame === null) return;
-      setData((prev) => mergeTelemetry(prev, frame));
-      applyDataReceived();
+      if (frame !== null) applyTelemetry(frame);
     };
     sock.connect();
     return () => sock.close();
-  }, [applyDataReceived]);
+  }, [applyTelemetry]);
 
   /* ---------------- производные значения ---------------- */
 
-  /** Время измерения оборудования — только из поля timestamp backend. */
   const measureTs = useMemo(() => normTs(data?.timestamp), [data?.timestamp]);
 
-  /** Возраст данных: реальное dataAgeMs от Gateway, иначе оценка по времени получения. */
   const dataAge = useMemo<number | null>(() => {
     const reported = num(data?.dataAgeMs);
     if (reported !== null) return reported;
@@ -223,71 +257,63 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return null;
   }, [data?.dataAgeMs, receivedAt, now]);
 
-  /**
-   * Статус соединения определяется реальными данными Gateway:
-   * успешный ответ / WS-фрейм + поле online + dataAgeMs.
-   * Само по себе открытое WebSocket-соединение статус В СЕТИ не даёт.
-   */
   const conn = useMemo<ConnectionStatus>(() => {
     if (rebooting && rawConn !== "ONLINE") return "RECONNECTING";
-    if (rawConn !== "ONLINE") return rawConn;
-    if (toBool(data?.online) === false) return "OFFLINE";
+    if (rawConn === "ONLINE") return dataAge !== null && dataAge > STALE_MS ? "STALE" : "ONLINE";
+    return rawConn;
+  }, [rawConn, rebooting, dataAge]);
+
+  /* Состояние телеметрии: по свежести данных, а не по факту соединения. */
+  const telemetryState = useMemo<SubsystemState>(() => {
+    if (data === null) return rawConn === "OFFLINE" ? "OFFLINE" : "NO_DATA";
+    if (rawConn === "OFFLINE") return "OFFLINE";
     if (dataAge !== null && dataAge > STALE_MS) return "STALE";
     return "ONLINE";
-  }, [rebooting, rawConn, data?.online, dataAge]);
+  }, [data, rawConn, dataAge]);
 
-  /** Статус BMS: bmsOnline + bmsDataAgeMs против единого порога STALE_MS. */
+  /* BMS: bmsOnline + bmsDataAgeMs. */
   const bmsState = useMemo<SubsystemState>(() => {
-    if (conn === "OFFLINE") return "OFFLINE";
-    const b = toBool(data?.bmsOnline) ?? toBool(bms?.online);
-    if (b === null) return "NO_DATA";
-    if (!b) return "OFFLINE";
-    const bmsAge =
-      num(data?.bmsDataAgeMs) ?? num(status?.bms_data_age_ms) ?? num(bms?.data_age_ms);
+    const online = toBool(data?.bmsOnline) ?? toBool(bms?.online) ?? toBool(status?.bms_online);
+    if (online === null) return rawConn === "OFFLINE" ? "OFFLINE" : "NO_DATA";
+    if (!online) return "OFFLINE";
+    const bmsAge = num(data?.bmsDataAgeMs) ?? num(status?.bms_data_age_ms) ?? num(bms?.data_age_ms);
     if (bmsAge !== null && bmsAge > STALE_MS) return "STALE";
+    if (rawConn === "OFFLINE") return "OFFLINE";
     return "ONLINE";
-  }, [conn, data?.bmsOnline, data?.bmsDataAgeMs, bms?.online, bms?.data_age_ms, status?.bms_data_age_ms]);
+  }, [data?.bmsOnline, bms?.online, bms?.data_age_ms, status?.bms_online, status?.bms_data_age_ms, data?.bmsDataAgeMs, rawConn]);
 
-  /**
-   * Статус Modbus-контроллера.
-   * Наличие СТАРЫХ числовых полей не считается доказательством работы:
-   * при устаревших данных показывается ДАННЫЕ УСТАРЕЛИ, при потере связи — НЕТ СВЯЗИ.
+  /*
+   * Modbus-контроллер: только controller_online / data age из Gateway.
+   * Наличие числовых полей НЕ считается доказательством работоспособности.
    */
   const controllerState = useMemo<SubsystemState>(() => {
-    if (conn === "OFFLINE") return "OFFLINE";
-    if (conn === "STALE") return "STALE";
-    if (conn !== "ONLINE") return "NO_DATA";
-    const hasFreshModbus = [
-      data?.pvVoltage,
-      data?.pvCurrent,
-      data?.pvPower,
-      data?.chargePower,
-      data?.loadVoltage,
-      data?.loadCurrent,
-      data?.loadPower,
-    ].some((v) => num(v) !== null);
-    return hasFreshModbus ? "ONLINE" : "NO_DATA";
-  }, [conn, data]);
+    const online = toBool(status?.controller_online);
+    if (online === null) return rawConn === "OFFLINE" ? "OFFLINE" : "NO_DATA";
+    if (!online) return "OFFLINE";
+    const modbusAge = num(status?.modbus_data_age_ms) ?? dataAge;
+    if (modbusAge !== null && modbusAge > STALE_MS) return "STALE";
+    if (rawConn === "OFFLINE") return "OFFLINE";
+    return "ONLINE";
+  }, [status?.controller_online, status?.modbus_data_age_ms, dataAge, rawConn]);
 
-  /** Счётчики интерфейса (браузер/frontend), не счётчики ESP32. */
   const counters = useMemo<SessionCounters>(
     () => ({ requests: httpStats.requests, errors: httpStats.errors }),
-    // перечитываются на каждом тике провайдера (1 с)
+    // счётчики перечитываются на каждом тике провайдера (1 c)
     [now],
   );
 
   /* ---------------- действия (единственный путь UI → Gateway) ---------------- */
 
-  const fetchHistory = useCallback(async (range: HistoryRange) => {
-    const path = range === "7d" ? "/api/history?range=7d" : "/api/history";
-    const res = await api.get<unknown>(path);
-    return normalizeHistory(res);
-  }, []);
-
   const fetchEngineering = useCallback(async () => {
     const res = await api.get<unknown>("/api/engineering");
-    if (!isRecord(res)) throw new Error("Некорректный ответ /api/engineering");
+    if (!isRecord(res)) throw new Error("Некорректные данные /api/engineering");
     return res as EngineeringData;
+  }, []);
+
+  const fetchConfig = useCallback(async () => {
+    const res = await api.get<unknown>("/api/config");
+    if (!isRecord(res)) throw new Error("Некорректные данные /api/config");
+    return res;
   }, []);
 
   const fetchLogs = useCallback(async () => {
@@ -301,14 +327,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const fetchRaw = useCallback(async () => {
     const res = await api.get<unknown>("/api/raw");
-    if (!isRecord(res)) throw new Error("Некорректный ответ /api/raw");
-    return res as RawData;
+    const validated = validateRawData(res);
+    if (validated === null) throw new Error("Некорректные данные /api/raw");
+    return validated;
   }, []);
 
   const fetchWifi = useCallback(async () => {
     const res = await api.get<unknown>("/api/wifi");
-    if (!isRecord(res)) throw new Error("Некорректный ответ /api/wifi");
-    return res as WifiData;
+    const validated = validateWifiData(res);
+    if (validated === null) throw new Error("Некорректные данные /api/wifi");
+    return validated;
   }, []);
 
   const saveWifi = useCallback(async (ssid: string, password: string) => {
@@ -348,10 +376,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       rebooting,
       showSources,
       counters,
+      telemetryState,
       bmsState,
       controllerState,
-      fetchHistory,
+      samples,
+      sessionStart,
       fetchEngineering,
+      fetchConfig,
       fetchLogs,
       clearLogs,
       fetchRaw,
@@ -375,10 +406,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       rebooting,
       showSources,
       counters,
+      telemetryState,
       bmsState,
       controllerState,
-      fetchHistory,
+      samples,
+      sessionStart,
       fetchEngineering,
+      fetchConfig,
       fetchLogs,
       clearLogs,
       fetchRaw,
@@ -395,6 +429,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
 export function useData(): DataContextValue {
   const ctx = useContext(DataContext);
-  if (!ctx) throw new Error("useData должен использоваться внутри DataProvider");
+  if (!ctx) throw new Error("useData must be used within DataProvider");
   return ctx;
 }

@@ -9,17 +9,21 @@
  *  - null / undefined / NaN / Infinity / неверный тип → null ("—" в UI);
  *  - недопустимое значение никогда не превращается в 0;
  *  - неизвестные поля отбрасываются, известные — нормализуются.
+ *
+ * ВАЖНО: прошивка v1.6.x не имеет /api/history — валидатор истории отсутствует,
+ * история собирается из реальных samples (WebSocket / опрос /api/data).
  */
 
 import type {
   BmsData,
-  HistoryPoint,
   JbdDiagnostics,
   LogEntry,
+  RawData,
   StatusData,
   SystemData,
+  VersionData,
+  WifiData,
 } from "../types";
-import { normTs } from "../utils/format";
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -69,7 +73,7 @@ function sanitizeNumberArray(v: unknown): (number | null)[] | null {
   return v.map((x) => sanitizeNumber(x));
 }
 
-/* ---------------- ключи ответов ---------------- */
+/* ---------------- /api/data и WS-фреймы ---------------- */
 
 const SYS_NUM = [
   "timestamp",
@@ -95,6 +99,8 @@ const SYS_NUM = [
   "faultCode",
   "dailyChargeAh",
   "dailyLoadAh",
+  "dailyChargeWh",
+  "dailyLoadWh",
   "totalChargeAh",
   "totalLoadAh",
   "totalChargeWh",
@@ -158,20 +164,15 @@ const TELEMETRY_KEYS: readonly string[] = [
   "totalChargeWh",
 ];
 
-/* ---------------- /api/data и WS-фреймы ---------------- */
-
 export function validateSystemData(raw: unknown): SystemData | null {
   if (!isRecord(raw)) return null;
-  const src: Record<string, unknown> = raw;
   const out: SystemData = {};
-
-  for (const k of SYS_NUM) if (k in src) (out as Record<string, unknown>)[k] = sanitizeNumber(src[k]);
-  for (const k of SYS_BOOL) if (k in src) (out as Record<string, unknown>)[k] = sanitizeBool(src[k]);
-  for (const k of SYS_STR) if (k in src) (out as Record<string, unknown>)[k] = sanitizeString(src[k]);
-  for (const k of SYS_FLEX) if (k in src) (out as Record<string, unknown>)[k] = sanitizeFlex(src[k]);
-  if ("bmsCells" in src) out.bmsCells = sanitizeNumberArray(src.bmsCells);
-  if ("bmsTemperatures" in src) out.bmsTemperatures = sanitizeNumberArray(src.bmsTemperatures);
-
+  for (const k of SYS_NUM) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeNumber(raw[k]);
+  for (const k of SYS_BOOL) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeBool(raw[k]);
+  for (const k of SYS_STR) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeString(raw[k]);
+  for (const k of SYS_FLEX) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeFlex(raw[k]);
+  if ("bmsCells" in raw) out.bmsCells = sanitizeNumberArray(raw.bmsCells);
+  if ("bmsTemperatures" in raw) out.bmsTemperatures = sanitizeNumberArray(raw.bmsTemperatures);
   return out;
 }
 
@@ -245,6 +246,7 @@ export function validateBmsData(raw: unknown): BmsData | null {
 
 const STATUS_NUM = [
   "rssi",
+  "modbus_data_age_ms",
   "modbus_errors",
   "modbus_retries",
   "bms_data_age_ms",
@@ -256,7 +258,7 @@ const STATUS_NUM = [
   "min_free_heap",
 ] as const;
 
-const STATUS_BOOL = ["online", "wifi", "ap_enabled", "bms_online"] as const;
+const STATUS_BOOL = ["online", "wifi", "ap_enabled", "bms_online", "controller_online"] as const;
 const STATUS_STR = ["device", "connected_ssid", "sta_ip", "ap_ip", "firmware_version"] as const;
 
 export function validateStatusData(raw: unknown): StatusData | null {
@@ -269,40 +271,67 @@ export function validateStatusData(raw: unknown): StatusData | null {
   return out;
 }
 
-/* ---------------- /api/history ---------------- */
+/* ---------------- /api/version ---------------- */
 
-/**
- * Нормализация точек истории.
- * Точки без корректного ts отбрасываются (дополнительные точки не создаются).
- * Флаг valid сохраняется как есть — решение о доверии принимает слой отображения.
- */
-export function normalizeHistory(res: unknown): HistoryPoint[] {
-  let arr: unknown = null;
-  if (Array.isArray(res)) arr = res;
-  else if (isRecord(res)) {
-    for (const key of ["points", "history", "samples", "data"]) {
-      if (Array.isArray(res[key])) {
-        arr = res[key];
-        break;
-      }
-    }
-  }
-  if (!Array.isArray(arr)) return [];
+const VERSION_STR = ["firmware_version", "version", "fw_version", "device", "build"] as const;
 
-  const out: HistoryPoint[] = [];
-  for (const item of arr) {
-    if (!isRecord(item)) continue;
-    const ts = normTs(item.ts ?? item.timestamp ?? item.time);
-    if (ts === null) continue;
-    out.push({
-      ts,
-      pv: "pv" in item ? sanitizeNumber(item.pv) : null,
-      batt: "batt" in item ? sanitizeNumber(item.batt) : null,
-      load: "load" in item ? sanitizeNumber(item.load) : null,
-      soc: "soc" in item ? sanitizeNumber(item.soc) : null,
-      valid: "valid" in item ? sanitizeBool(item.valid) : null,
-    });
-  }
+export function validateVersionData(raw: unknown): VersionData | null {
+  if (!isRecord(raw)) return null;
+  const out: VersionData = {};
+  for (const k of VERSION_STR) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeString(raw[k]);
+  return out;
+}
+
+/* ---------------- /api/wifi ---------------- */
+
+const WIFI_NUM = ["rssi", "ap_clients", "ap_channel", "ap_max_clients"] as const;
+const WIFI_STR = [
+  "ssid",
+  "connected_ssid",
+  "connectedSsid",
+  "sta_ip",
+  "staIp",
+  "ip",
+  "ap_ssid",
+  "apSsid",
+  "ap_ip",
+  "apIp",
+] as const;
+const WIFI_BOOL = [
+  "password_saved",
+  "passwordSaved",
+  "connected",
+  "ap_enabled",
+  "apEnabled",
+] as const;
+
+export function validateWifiData(raw: unknown): WifiData | null {
+  if (!isRecord(raw)) return null;
+  const out: WifiData = {};
+  for (const k of WIFI_NUM) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeNumber(raw[k]);
+  for (const k of WIFI_STR) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeString(raw[k]);
+  for (const k of WIFI_BOOL) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeBool(raw[k]);
+  if ("ap_dhcp" in raw) out.ap_dhcp = sanitizeFlex(raw.ap_dhcp);
+  if ("apDhcp" in raw) out.apDhcp = sanitizeFlex(raw.apDhcp);
+  if ("ap_clients" in raw) out.ap_clients = sanitizeNumber(raw.ap_clients);
+  if ("apClients" in raw) out.apClients = sanitizeNumber(raw.apClients);
+  return out;
+}
+
+/* ---------------- /api/raw ---------------- */
+
+const RAW_NUM = ["slave_id", "start_register", "register_count", "last_response_length"] as const;
+const RAW_STR = ["request_hex", "response_hex"] as const;
+
+export function validateRawData(raw: unknown): RawData | null {
+  if (!isRecord(raw)) return null;
+  const out: RawData = {};
+  for (const k of RAW_NUM) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeNumber(raw[k]);
+  for (const k of RAW_STR) if (k in raw) (out as Record<string, unknown>)[k] = sanitizeString(raw[k]);
+  if ("function" in raw) out.function = sanitizeFlex(raw.function);
+  if ("last_response_crc_ok" in raw) out.last_response_crc_ok = sanitizeBool(raw.last_response_crc_ok);
+  if ("last_modbus_error" in raw) out.last_modbus_error = sanitizeFlex(raw.last_modbus_error);
+  if ("registers" in raw) out.registers = raw.registers;
   return out;
 }
 
@@ -331,9 +360,10 @@ export function normalizeLogs(res: unknown): LogEntry[] {
     const rawText = item.msg ?? item.message ?? item.text ?? item.line ?? item.log;
     const text = sanitizeString(rawText);
     if (text === null) continue;
+    const tsNum = sanitizeNumber(item.ts ?? item.time ?? item.timestamp);
     out.push({
       text,
-      ts: normTs(item.ts ?? item.time ?? item.timestamp),
+      ts: tsNum === null ? null : tsNum < 1e12 ? tsNum * 1000 : tsNum,
       level: sanitizeString(item.level ?? item.lvl),
     });
   }

@@ -7,8 +7,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { HistoryPoint } from "../types";
-import { DASH, fmtDateTime, normTs, num, ruNum, toBool } from "../utils/format";
+import type { SamplePoint } from "../types";
+import { DASH, fmtDateTime, fmtTime, num, ruNum } from "../utils/format";
 import { EmptyState } from "./ui";
 import { LineChart as LineChartIcon } from "lucide-react";
 
@@ -28,10 +28,12 @@ interface TipProps {
 
 function ChartTip({ active, payload, label, defs }: TipProps) {
   if (!active || !payload || payload.length === 0) return null;
-  const ts = normTs(label);
+  const t = num(label);
   return (
     <div className="bg-panel border border-line2 rounded px-2.5 py-2 shadow-xl">
-      <div className="num text-[10px] text-mut mb-1">{fmtDateTime(ts)}</div>
+      <div className="num text-[10px] text-mut mb-1">
+        {fmtDateTime(t ?? null)} · {fmtTime(t ?? null)}
+      </div>
       {payload.map((p) => {
         const def = defs.find((d) => d.key === p.dataKey);
         if (!def) return null;
@@ -51,31 +53,49 @@ function ChartTip({ active, payload, label, defs }: TipProps) {
 }
 
 /**
- * График истории. Все точки — только из /api/history.
- *  - точка с valid = false не рисуется как достоверное измерение;
- *  - дополнительные точки не создаются, кривая не "дорисовывается";
- *  - нет данных => "Нет исторических данных".
+ * График по реально полученным samples (WebSocket / опрос /api/data).
+ *  - точки фронтендом НЕ создаются и не интерполируются;
+ *  - sample с valid=false не рисуется как достоверное измерение;
+ *  - окно (1 ч / 6 ч / 24 ч / 7 дней) фильтрует образцы по времени.
  */
-export function HistoryChart({
-  points,
+export function SamplesChart({
+  samples,
   series,
+  windowHours,
   height = 190,
+  sessionStart,
 }: {
-  points: HistoryPoint[];
+  samples: SamplePoint[];
   series: SeriesDef[];
+  /** null — показать все samples сессии */
+  windowHours: number | null;
   height?: number;
+  sessionStart: number;
 }) {
-  const rows = points.map((p) => {
-    /* valid === false — измерение недостоверно, не отображаем */
-    const bad = toBool(p.valid) === false;
-    return {
-      ts: p.ts,
-      pv: series.some((s) => s.key === "pv") && !bad ? num(p.pv) : null,
-      batt: series.some((s) => s.key === "batt") && !bad ? num(p.batt) : null,
-      load: series.some((s) => s.key === "load") && !bad ? num(p.load) : null,
-      soc: series.some((s) => s.key === "soc") && !bad ? num(p.soc) : null,
-    };
-  });
+  const cutoff = windowHours === null ? 0 : Date.now() - windowHours * 3_600_000;
+  const rows = samples
+    .filter((p) => p.ts >= cutoff)
+    .map((p) => {
+      const bad = !p.valid;
+      return {
+        ts: p.ts,
+        pv: series.some((s) => s.key === "pv") && !bad ? p.pv : null,
+        batt: series.some((s) => s.key === "batt") && !bad ? p.batt : null,
+        load: series.some((s) => s.key === "load") && !bad ? p.load : null,
+        soc: series.some((s) => s.key === "soc") && !bad ? p.soc : null,
+      };
+    });
+
+  if (samples.length === 0) {
+    return (
+      <EmptyState
+        icon={LineChartIcon}
+        title="Исторические данные отсутствуют"
+        hint={`История доступна с момента запуска интерфейса (${fmtTime(sessionStart)}). Точки появляются по мере получения реальных фреймов от Gateway.`}
+        compact
+      />
+    );
+  }
 
   const hasValue = rows.some(
     (r) => r.pv !== null || r.batt !== null || r.load !== null || r.soc !== null,
@@ -85,8 +105,8 @@ export function HistoryChart({
     return (
       <EmptyState
         icon={LineChartIcon}
-        title="Нет исторических данных"
-        hint="GET /api/history не вернул достоверных точек измерений"
+        title="Недостаточно исторических данных"
+        hint="За выбранный период реальных образцов не получено. Отсутствующие значения не заполняются."
         compact
       />
     );
@@ -97,7 +117,7 @@ export function HistoryChart({
   const showDots = rows.length <= 2;
 
   const tickFmt = (v: unknown) => {
-    const t = normTs(v);
+    const t = num(v);
     if (t === null) return "";
     const d = new Date(t);
     const p = (x: number) => x.toString().padStart(2, "0");
@@ -150,6 +170,34 @@ export function HistoryChart({
           ))}
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+/** Сегментированный переключатель временного окна. */
+export function WindowSwitch({
+  value,
+  onChange,
+  options,
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+  options: { label: string; hours: number | null }[];
+}) {
+  return (
+    <div className="flex rounded border border-line overflow-hidden">
+      {options.map((o) => (
+        <button
+          key={o.label}
+          type="button"
+          onClick={() => onChange(o.hours)}
+          className={`px-2.5 py-1 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors ${
+            value === o.hours ? "bg-acc text-white" : "text-mut hover:text-ink bg-panel2"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }

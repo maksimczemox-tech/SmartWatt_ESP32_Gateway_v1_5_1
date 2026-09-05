@@ -102,6 +102,10 @@ export function BatteryPage() {
           <Metric label="Макс. ток нагрузки" value={data?.maxLoadCurrent} digits={1} unitStr="A" source="/api/data · maxLoadCurrent" />
           <Metric label="Макс. мощность нагрузки" value={data?.maxLoadPower} digits={0} unitStr="W" source="/api/data · maxLoadPower" />
         </div>
+        <p className="text-[10.5px] text-mut/70 mt-3 leading-relaxed">
+          Лимиты нагрузки — это ограничения выхода LOAD контроллера. Физическая нагрузка подключена к аккумулятору,
+          поэтому её мощность на главной странице рассчитывается как max(0, PV − BMS).
+        </p>
       </Card>
     </div>
   );
