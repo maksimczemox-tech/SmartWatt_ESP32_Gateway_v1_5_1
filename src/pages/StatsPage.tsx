@@ -53,12 +53,12 @@ export function StatsPage() {
         </div>
       </Card>
 
-      {/* отчёт производства */}
-      <Card title="Отчет производства энергии" icon={<BarChart3 size={13} />} delay={60} className="mt-3">
+      {/* отчёт по энергии (счётчики прошивки; не производство PV) */}
+      <Card title="Отчет по энергии" icon={<BarChart3 size={13} />} delay={60} className="mt-3">
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
           {(
             [
-              ["Сегодня", num(data?.dailyChargeWh), "Энергия, переданная в аккумулятор"],
+              ["Энергия заряда АКБ · сегодня", num(data?.dailyChargeWh), "Счётчик прошивки dailyChargeWh"],
               ["Вчера", null, null],
               ["7 дней", null, null],
               ["30 дней", null, null],

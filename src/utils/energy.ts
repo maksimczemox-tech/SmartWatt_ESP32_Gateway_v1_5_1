@@ -79,6 +79,18 @@ export function chargeForecast(input: {
   }
   if (soc >= 100) return { kind: "full" };
 
+  /*
+   * Валидация входных данных прогноза (РАСЧЁТНОЕ ВРЕМЯ ДО 100%).
+   * Противоречивые или некорректные значения => "Недостаточно данных",
+   * прогноз не показывается.
+   */
+  if (soc < 0 || soc > 100) return { kind: "insufficient", reason: "Некорректный SOC" };
+  if (!(fullAh > 0)) return { kind: "insufficient", reason: "Некорректная полная ёмкость" };
+  if (!(remainingAh >= 0) || remainingAh > fullAh) {
+    return { kind: "insufficient", reason: "Остаточная ёмкость противоречит полной" };
+  }
+  if (!(voltage > 0)) return { kind: "insufficient", reason: "Некорректное напряжение" };
+
   let powerUsed: number | null = null;
   let note: string | undefined;
 

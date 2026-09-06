@@ -396,7 +396,7 @@ export function HomePage() {
 
       {/* ОТЧЁТ + СТАТУС */}
       <div className="grid lg:grid-cols-2 gap-3 mt-3">
-        <Card title="Отчёт производства энергии" icon={<Sun size={13} />} delay={140}>
+        <Card title="Отчёт по энергии" icon={<Sun size={13} />} delay={140}>
           <div className="grid grid-cols-2 gap-2.5 mb-3">
             <div className="rounded border border-line bg-panel2/70 px-3 py-2.5">
               <div className="text-[9.5px] tracking-[0.14em] uppercase text-mut">Сегодня · солнечная энергия</div>
