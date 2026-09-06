@@ -14,8 +14,9 @@ import { useData } from "../store/DataContext";
 import { Card, Btn, ConfirmDialog, EmptyState, KV, SectionTitle } from "../components/ui";
 import { apiOriginLabel, DATA_SOURCE } from "../services/api";
 import { useSettings } from "../hooks/useSettings";
+import { WEATHER_PROVIDERS } from "../services/weather";
 import type { WifiData } from "../types";
-import { firstDef, fmt, str, yesNo } from "../utils/format";
+import { firstDef, fmt, num, ruNum, str, yesNo } from "../utils/format";
 import type { ForecastMode } from "../utils/energy";
 
 function normalizeWifi(w: WifiData) {
@@ -40,17 +41,43 @@ const inputCls =
   "w-full bg-panel2 border border-line rounded px-2.5 py-2 text-[12.5px] text-ink placeholder:text-mut/60 outline-none focus:border-acc transition-colors num";
 
 export function SettingsPage() {
-  const { fetchWifi, saveWifi, reboot, conn, rebooting, wsOpen, counters, refreshTelemetry } = useData();
+  const {
+    fetchWifi,
+    saveWifi,
+    reboot,
+    conn,
+    rebooting,
+    wsOpen,
+    counters,
+    refreshTelemetry,
+    espConfig,
+    saveEspConfig,
+  } = useData();
   const [settings, setSettings] = useSettings();
 
   const [wifi, setWifi] = useState<WifiData | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  const [latInput, setLatInput] = useState(settings.lat === null ? "" : String(settings.lat));
-  const [lonInput, setLonInput] = useState(settings.lon === null ? "" : String(settings.lon));
+  /* Координаты и провайдер погоды — из настроек Gateway (NVS), а не из браузера. */
+  const espLat = num(espConfig?.latitude);
+  const espLon = num(espConfig?.longitude);
+  const [latInput, setLatInput] = useState(espLat === null ? "" : ruNum(espLat, 5));
+  const [lonInput, setLonInput] = useState(espLon === null ? "" : ruNum(espLon, 5));
+  const [provSel, setProvSel] = useState<string>(str(espConfig?.weather_provider) !== "—" ? (str(espConfig?.weather_provider) as string) : "");
+  const [geoSaving, setGeoSaving] = useState(false);
   const [minSocInput, setMinSocInput] = useState(String(settings.minSoc));
-  const [geoMsg, setGeoMsg] = useState<string | null>(null);
+  const [geoMsg, setGeoMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+
+  /* Подгоняем поля ввода под фактические значения, пришедшие с ESP32. */
+  useEffect(() => {
+    setLatInput(espLat === null ? "" : ruNum(espLat, 5));
+    setLonInput(espLon === null ? "" : ruNum(espLon, 5));
+  }, [espLat, espLon]);
+  useEffect(() => {
+    const p = str(espConfig?.weather_provider);
+    setProvSel(p !== "—" ? p : "");
+  }, [espConfig]);
 
   const [ssid, setSsid] = useState("");
   const [pass, setPass] = useState("");
@@ -73,25 +100,41 @@ export function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Сохранение координат + источника погоды в NVS Gateway (POST /api/config). */
   const saveGeo = () => {
     const lat = latInput.trim() === "" ? null : Number(latInput.replace(",", "."));
     const lon = lonInput.trim() === "" ? null : Number(lonInput.replace(",", "."));
-    if ((lat !== null && !Number.isFinite(lat)) || (lat !== null && (lat < -90 || lat > 90))) {
-      setGeoMsg("Широта должна быть в диапазоне от −90 до 90");
+    if (lat !== null && (!Number.isFinite(lat) || lat < -90 || lat > 90)) {
+      setGeoMsg({ tone: "err", text: "Широта должна быть в диапазоне от −90 до 90" });
       return;
     }
-    if ((lon !== null && !Number.isFinite(lon)) || (lon !== null && (lon < -180 || lon > 180))) {
-      setGeoMsg("Долгота должна быть в диапазоне от −180 до 180");
+    if (lon !== null && (!Number.isFinite(lon) || lon < -180 || lon > 180)) {
+      setGeoMsg({ tone: "err", text: "Долгота должна быть в диапазоне от −180 до 180" });
       return;
     }
-    setSettings({ lat, lon });
-    setGeoMsg(lat === null || lon === null ? "Координаты удалены — расчёт Солнца отключён" : "Координаты сохранены в браузере");
+    setGeoSaving(true);
+    void saveEspConfig({ latitude: lat, longitude: lon, weather_provider: provSel || null }).then((saved) => {
+      setGeoSaving(false);
+      if (saved === null) {
+        setGeoMsg({ tone: "err", text: "Не удалось сохранить настройки на Gateway" });
+        return;
+      }
+      const sLat = num(saved.latitude);
+      const sLon = num(saved.longitude);
+      setGeoMsg({
+        tone: "ok",
+        text:
+          sLat === null || sLon === null
+            ? "Координаты сброшены — расчёт Солнца отключён"
+            : `Сохранено на Gateway: ${ruNum(sLat, 5)}, ${ruNum(sLon, 5)}`,
+      });
+    });
   };
 
   const saveMinSoc = () => {
     const v = Number(minSocInput);
     if (!Number.isFinite(v) || v < 0 || v > 100) {
-      setGeoMsg("Минимальный SOC должен быть в диапазоне 0–100 %");
+      setGeoMsg({ tone: "err", text: "Минимальный SOC должен быть в диапазоне 0–100 %" });
       return;
     }
     setSettings({ minSoc: Math.round(v) });
@@ -121,39 +164,64 @@ export function SettingsPage() {
 
   return (
     <div>
-      {/* НАСТРОЙКИ ИНТЕРФЕЙСА (localStorage) */}
-      <Card title="Настройки интерфейса" icon={<Settings2 size={13} />} delay={0}>
+      {/* МЕСТОПОЛОЖЕНИЕ И ПОГОДА (хранится на ESP32, NVS) */}
+      <Card
+        title="Местоположение и погода"
+        icon={<MapPin size={13} />}
+        delay={0}
+        right={
+          <span className="num text-[10px] text-mut hidden sm:inline">
+            ESP32: {espLat === null || espLon === null ? "не задано" : `${ruNum(espLat, 5)}, ${ruNum(espLon, 5)}`}
+          </span>
+        }
+      >
         <div className="grid lg:grid-cols-2 gap-x-8 gap-y-5">
-          {/* Местоположение */}
           <div>
             <SectionTitle>
-              <span className="inline-flex items-center gap-1.5"><MapPin size={11} /> Местоположение (расчёт Солнца)</span>
+              <span className="inline-flex items-center gap-1.5"><MapPin size={11} /> Координаты (хранятся в Gateway)</span>
             </SectionTitle>
             <div className="grid grid-cols-2 gap-2.5 max-w-md">
               <div>
-                <label className="text-[10px] uppercase tracking-[0.14em] text-mut block mb-1">Широта</label>
-                <input className={inputCls} value={latInput} onChange={(e) => setLatInput(e.target.value)} placeholder="Например: 55.7558" inputMode="decimal" />
+                <label className="text-[10px] uppercase tracking-[0.14em] text-mut block mb-1">Широта (−90…90)</label>
+                <input className={inputCls} value={latInput} onChange={(e) => setLatInput(e.target.value)} placeholder="55.7558" inputMode="decimal" />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-[0.14em] text-mut block mb-1">Долгота</label>
-                <input className={inputCls} value={lonInput} onChange={(e) => setLonInput(e.target.value)} placeholder="Например: 37.6176" inputMode="decimal" />
+                <label className="text-[10px] uppercase tracking-[0.14em] text-mut block mb-1">Долгота (−180…180)</label>
+                <input className={inputCls} value={lonInput} onChange={(e) => setLonInput(e.target.value)} placeholder="37.6176" inputMode="decimal" />
               </div>
             </div>
-            <div className="flex items-center gap-2.5 mt-2">
-              <Btn tone="primary" onClick={saveGeo}>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.14em] text-mut mb-1 mt-3">Источник погоды</div>
+              <select
+                className={`${inputCls} max-w-md`}
+                value={provSel}
+                onChange={(e) => setProvSel(e.target.value)}
+              >
+                <option value="">— Не использовать погоду —</option>
+                {WEATHER_PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2.5 mt-2.5 flex-wrap">
+              <Btn tone="primary" onClick={saveGeo} busy={geoSaving}>
                 <Save size={12} />
-                Сохранить координаты
+                Сохранить на Gateway
               </Btn>
-              {geoMsg && <span className="text-[11px] text-mut">{geoMsg}</span>}
+              {geoMsg && (
+                <span className={`text-[11px] ${geoMsg.tone === "ok" ? "text-ok" : "text-bad"}`}>{geoMsg.text}</span>
+              )}
             </div>
             <p className="text-[10.5px] text-mut/70 mt-2 leading-relaxed max-w-md">
-              Координаты используются только браузером для астрономического расчёта положения Солнца
-              (азимут, высота, восход, закат). В ESP32 они не отправляются — такого API в прошивке нет.
-              Пустые поля — расчёт отключён («Местоположение не задано»).
+              Координаты и источник погоды сохраняются в энергонезависимой памяти Gateway (NVS) и
+              переживают его перезагрузку. Погоду запрашивает браузер напрямую у погодного API по этим
+              координатам; Gateway её не получает и не проксирует. Пустые поля — «Местоположение не задано».
             </p>
           </div>
 
-          {/* Прогнозы */}
+          {/* Прогнозы (localStorage — только настройки интерфейса) */}
           <div>
             <SectionTitle>Расчетные показатели</SectionTitle>
             <div className="max-w-md">
