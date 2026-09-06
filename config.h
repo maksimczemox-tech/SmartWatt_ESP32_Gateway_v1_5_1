@@ -1,0 +1,123 @@
+#pragma once
+
+#include <Arduino.h>
+
+// ===================== Firmware =====================
+#define SMARTWATT_FIRMWARE_VERSION "1.6.0"
+#define SMARTWATT_FIRMWARE_NAME "SmartWatt Solar + JBD BMS Gateway"
+
+// ===================== Wi-Fi =====================
+#define WIFI_SSID               "Aleksandra"
+#define WIFI_PASSWORD           "sashasasha"
+#define WIFI_CONNECT_TIMEOUT_MS 15000UL
+#define WIFI_RECONNECT_MS       10000UL
+
+// Fallback Access Point
+#define ENABLE_FALLBACK_AP      1
+#define AP_SSID                 "SmartWatt-Gateway"
+#define AP_PASSWORD             "12345678"
+#define AP_IP_A                 192
+#define AP_IP_B                 168
+#define AP_IP_C                 4
+#define AP_IP_D                 1
+#define AP_NETMASK_A            255
+#define AP_NETMASK_B            255
+#define AP_NETMASK_C            255
+#define AP_NETMASK_D            0
+#define AP_MAX_CLIENTS           4
+#define AP_CHANNEL               1
+#define WIFI_RECONNECT_INTERVAL_MS 60000
+
+// ===================== Web =====================
+#define HTTP_PORT               80
+#define WEBSOCKET_PORT          81
+#define WEBSOCKET_INTERVAL_MS   2000UL
+
+// ===================== Serial =====================
+#define SERIAL_DEBUG_BAUD       115200
+#define RS232_RX_PIN            16
+#define RS232_TX_PIN            17
+
+// ===================== JBD BMS UART =====================
+// Read-only JBD / Jiabaida Smart BMS interface.
+// Default pins match ESP32 UART1 routing and are not used by the MPPT UART2.
+#define ENABLE_JBD_BMS          1
+#define JBD_RX_PIN              26
+#define JBD_TX_PIN              27
+// JBD 4-pin UART connector (HY2.0): 1=GND, 2=RXD, 3=TXD, 4=VDD.
+// Pin 4 (VDD) is intentionally NOT connected to ESP32.
+#define JBD_PIN_GND             1
+#define JBD_PIN_RXD             2
+#define JBD_PIN_TXD             3
+#define JBD_PIN_VDD             4
+#define JBD_BAUDRATE            9600
+#define JBD_TIMEOUT_MS          500UL
+#define JBD_POLL_INTERVAL_MS    2000UL
+#define JBD_CELL_POLL_INTERVAL_MS 5000UL
+#define JBD_DIAGNOSTIC_MODE     1
+
+// ===================== Modbus RTU =====================
+// COMPATIBILITY PROFILE - VERIFY ON SMARTWATT MPPT 2440
+#define MODBUS_BAUDRATE         9600
+#define MODBUS_SLAVE_ID         1
+#define MODBUS_DISCOVERY_ID     255
+#define MODBUS_FUNCTION_READ    0x03
+#define MODBUS_START_REGISTER   0x0100
+#define MODBUS_REGISTER_COUNT   35
+#define MODBUS_TIMEOUT_MS       1000UL
+#define MODBUS_RETRIES          3
+#define MODBUS_POLL_INTERVAL_MS 2000UL
+#define MODBUS_INTERFRAME_MS    5UL
+
+#define DEBUG_RAW_MODBUS        1
+#define MODBUS_DIAGNOSTIC_MODE  1
+#define ENABLE_MODBUS_SCAN      0
+#define USE_PACKED_LOAD_STATUS  1
+#define MODBUS_32BIT_HIGH_WORD_FIRST 1
+
+// ===================== Register map =====================
+// COMPATIBILITY PROFILE - VERIFY ON SMARTWATT MPPT 2440
+#define REGISTER_BATTERY_SOC             0x0100
+#define REGISTER_BATTERY_VOLTAGE         0x0101
+#define REGISTER_BATTERY_CURRENT         0x0102
+#define REGISTER_TEMPERATURE_PACKED      0x0103
+#define REGISTER_LOAD_VOLTAGE            0x0104
+#define REGISTER_LOAD_CURRENT            0x0105
+#define REGISTER_LOAD_POWER              0x0106
+#define REGISTER_PV_VOLTAGE              0x0107
+#define REGISTER_PV_CURRENT              0x0108
+#define REGISTER_CHARGE_POWER            0x0109
+#define REGISTER_LOAD_STATE              0x010A
+#define REGISTER_BATTERY_MIN_VOLTAGE     0x010B
+#define REGISTER_BATTERY_MAX_VOLTAGE     0x010C
+#define REGISTER_MAX_CHARGE_CURRENT      0x010D
+#define REGISTER_MAX_LOAD_CURRENT        0x010E
+#define REGISTER_MAX_CHARGE_POWER        0x010F
+#define REGISTER_MAX_LOAD_POWER          0x0110
+#define REGISTER_DAILY_CHARGE_AH         0x0111
+#define REGISTER_DAILY_LOAD_AH           0x0112
+#define REGISTER_RUNNING_DAYS            0x0115
+#define REGISTER_OVER_DISCHARGES         0x0116
+#define REGISTER_FULL_CHARGES            0x0117
+#define REGISTER_TOTAL_CHARGE_AH_HI      0x0118
+#define REGISTER_TOTAL_CHARGE_AH_LO      0x0119
+#define REGISTER_TOTAL_LOAD_AH_HI        0x011A
+#define REGISTER_TOTAL_LOAD_AH_LO        0x011B
+#define REGISTER_TOTAL_CHARGE_WH_HI      0x011C
+#define REGISTER_TOTAL_CHARGE_WH_LO      0x011D
+#define REGISTER_TOTAL_LOAD_WH_HI        0x011E
+#define REGISTER_TOTAL_LOAD_WH_LO        0x011F
+#define REGISTER_CHARGE_LOAD_STATUS      0x0120
+#define REGISTER_AUXILIARY               0x0121
+#define REGISTER_FAULT                   0x0122
+
+enum class ModbusResult : uint8_t {
+  OK = 0,
+  TIMEOUT,
+  INVALID_LENGTH,
+  INVALID_SLAVE,
+  INVALID_FUNCTION,
+  INVALID_BYTE_COUNT,
+  CRC_ERROR,
+  EXCEPTION_RESPONSE
+};
