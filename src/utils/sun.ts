@@ -30,6 +30,11 @@ export interface SunInfo {
   daylightFraction: number | null;
   polarNight: boolean;
   polarDay: boolean;
+  /** Азимут восхода / заката, ° (null — полярные условия). */
+  sunriseAzimuthDeg: number | null;
+  sunsetAzimuthDeg: number | null;
+  /** Максимальная высота Солнца в этот день (в солнечный полдень), °. */
+  maxElevationDeg: number;
 }
 
 const RAD = Math.PI / 180;
@@ -136,6 +141,22 @@ export function sunInfo(date: Date, latDeg: number, lonDeg: number): SunInfo {
      метки времени уже локальны через Date */
   void tzOffMin;
 
+  /* ----- азимут восхода/заката и максимальная высота ----- */
+  let sunriseAzimuthDeg: number | null = null;
+  let sunsetAzimuthDeg: number | null = null;
+  if (!polarNight && !polarDay) {
+    const h0 = -0.833 * RAD;
+    const cosAz =
+      (Math.sin(decl) - Math.sin(h0) * Math.sin(lat)) / (Math.cos(h0) * Math.cos(lat));
+    const az0 = Math.acos(Math.min(1, Math.max(-1, cosAz))) * DEG;
+    sunriseAzimuthDeg = az0;
+    sunsetAzimuthDeg = 360 - az0;
+  }
+
+  /* высота в солнечный полдень (часовой угол = 0) */
+  const sinNoon = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl);
+  const maxElevationDeg = Math.asin(Math.min(1, Math.max(-1, sinNoon))) * DEG;
+
   return {
     elevationDeg,
     azimuthDeg,
@@ -149,5 +170,8 @@ export function sunInfo(date: Date, latDeg: number, lonDeg: number): SunInfo {
     daylightFraction,
     polarNight,
     polarDay,
+    sunriseAzimuthDeg,
+    sunsetAzimuthDeg,
+    maxElevationDeg,
   };
 }

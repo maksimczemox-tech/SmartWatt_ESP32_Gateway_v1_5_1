@@ -3,6 +3,7 @@ import { BarChart3 } from "lucide-react";
 import { useData } from "../store/DataContext";
 import { Card, Metric } from "../components/ui";
 import { SamplesChart, WindowSwitch, type SeriesDef } from "../components/charts";
+import { estimatedLoadPower } from "../utils/energy";
 import { fmt, fmtTime, kwh, num } from "../utils/format";
 
 const S_PV: SeriesDef = { key: "pv", name: "PV", color: "#FFC400", unit: "W" };
@@ -11,7 +12,7 @@ const S_LOAD: SeriesDef = { key: "load", name: "Нагрузка (расчет)"
 const S_SOC: SeriesDef = { key: "soc", name: "SOC", color: "#70D900", unit: "%" };
 
 export function StatsPage() {
-  const { data, samples, sessionStart } = useData();
+  const { data, bat, samples, sessionStart } = useData();
   const [windowH, setWindowH] = useState<number | null>(24);
 
   return (
@@ -42,11 +43,13 @@ export function StatsPage() {
           />
           <Metric label="Полные заряды" value={data?.fullCharges} digits={0} source="/api/data · fullCharges" />
           <Metric label="Глубокие разряды" value={data?.overDischarges} digits={0} tone="bad" source="/api/data · overDischarges" />
-          <Metric label="Расчетная нагрузка сейчас" value={(() => {
-            const pv = num(data?.pvPower);
-            const b = num(data?.bmsPower);
-            return pv === null || b === null ? null : Math.max(0, pv - b);
-          })()} digits={0} unitStr="W" source="расчет · max(0, PV − BMS)" />
+          <Metric
+            label="Расчётная нагрузка сейчас"
+            value={estimatedLoadPower(num(data?.pvPower), bat.power)}
+            digits={0}
+            unitStr="W"
+            source="расчёт · max(0, PV − АКБ)"
+          />
         </div>
       </Card>
 

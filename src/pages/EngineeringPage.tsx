@@ -242,7 +242,14 @@ export function EngineeringPage() {
           <Metric label="Мощность батареи" value={data?.bmsPower} digits={1} unitStr="W" source="/api/data · bmsPower" sub={<span>источник: BMS</span>} />
           <Metric label="Напряжение BMS" value={bms?.voltage} digits={2} unitStr="V" source="/api/bms · voltage" />
           <Metric label="Мощность PV" value={data?.pvPower} digits={1} unitStr="W" source="/api/data · pvPower" />
-          <Metric label="Мощность нагрузки" value={data?.loadPower} digits={1} unitStr="W" source="/api/data · loadPower" />
+          <Metric
+            label="loadPower контроллера"
+            value={data?.loadPower}
+            digits={1}
+            unitStr="W"
+            source="/api/data · loadPower"
+            sub={<span className="text-warn/90">Поле контроллера — не используется для расчёта нагрузки</span>}
+          />
           <Metric label="Заряд (SOC)" value={data?.batterySOC} digits={1} unitStr="%" source="/api/data · batterySOC" />
         </div>
         <p className="text-[10.5px] text-mut/70 mt-2.5">
@@ -250,6 +257,27 @@ export function EngineeringPage() {
           для сверки интерфейса с реальным Gateway.
         </p>
       </Card>
+
+      {/* правило расчёта нагрузки */}
+      <div className="reveal rounded-lg border border-line bg-panel px-3.5 py-3 mb-3">
+        <div className="text-[10px] tracking-[0.16em] uppercase text-mut mb-1.5">Расчёт нагрузки</div>
+        <div className="grid sm:grid-cols-3 gap-3 text-[11.5px]">
+          <div>
+            <div className="text-mut">Основной расчёт</div>
+            <div className="num text-ink mt-0.5">Расчётная нагрузка = max(0, PV − АКБ)</div>
+          </div>
+          <div>
+            <div className="text-mut">Поле контроллера</div>
+            <div className="num text-ink mt-0.5">
+              loadPower <span className="text-warn">— не используется для расчёта нагрузки</span>
+            </div>
+          </div>
+          <div>
+            <div className="text-mut">Причина</div>
+            <div className="text-ink/85 mt-0.5">Нагрузка подключена к аккумулятору, а не к выходу LOAD контроллера</div>
+          </div>
+        </div>
+      </div>
 
       {/* секции engineering */}
       <SectionTitle>Разделы GET /api/engineering</SectionTitle>

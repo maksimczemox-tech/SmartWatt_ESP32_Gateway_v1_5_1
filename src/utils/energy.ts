@@ -123,6 +123,62 @@ export type Autonomy =
  * Автономность: энергия между текущим SOC и пользовательским минимумом,
  * делённая на расчетную нагрузку. Только реальные данные.
  */
+/* ---------------- интеграция энергии по реальным samples ---------------- */
+
+export type SampleKey = "pv" | "batt" | "load";
+
+export interface EnergyIntegral {
+  wh: number;
+  fromTs: number;
+  toTs: number;
+  count: number;
+}
+
+/**
+ * Энергия (Wh) трапецеидальной интеграцией МЕЖДУ реально полученными samples.
+ * Промежутки более 10 минут (разрыв связи) не интегрируются —
+ * отсутствующие данные не домысливаются.
+ * Недостаточно образцов → null.
+ */
+export function integrateEnergyWh(
+  samples: SamplePoint[],
+  key: SampleKey,
+  maxGapMs = 10 * 60_000,
+): EnergyIntegral | null {
+  const pts = samples.filter((s) => s.valid && s[key] !== null);
+  if (pts.length < 2) return null;
+  let wh = 0;
+  let covered = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dtMs = pts[i].ts - pts[i - 1].ts;
+    if (dtMs <= 0 || dtMs > maxGapMs) continue;
+    const a = pts[i - 1][key] as number;
+    const b = pts[i][key] as number;
+    wh += ((a + b) / 2) * (dtMs / 3_600_000);
+    covered += 1;
+  }
+  if (covered === 0) return null;
+  return { wh, fromTs: pts[0].ts, toTs: pts[pts.length - 1].ts, count: pts.length };
+}
+
+/** Пиковая мощность по реальным samples (максимум, без выдумок). */
+export function peakPower(samples: SamplePoint[], key: SampleKey): number | null {
+  let peak: number | null = null;
+  for (const s of samples) {
+    if (!s.valid) continue;
+    const v = s[key];
+    if (v === null) continue;
+    if (peak === null || v > peak) peak = v;
+  }
+  return peak;
+}
+
+/** Фактический накопленный период (первый/последний реальный sample). */
+export function actualSpan(samples: SamplePoint[]): { fromTs: number; toTs: number } | null {
+  if (samples.length === 0) return null;
+  return { fromTs: samples[0].ts, toTs: samples[samples.length - 1].ts };
+}
+
 export function autonomy(input: {
   soc: number | null;
   fullAh: number | null;

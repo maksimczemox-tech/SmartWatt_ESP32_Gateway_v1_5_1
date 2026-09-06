@@ -8,7 +8,7 @@ import {
   YAxis,
 } from "recharts";
 import type { SamplePoint } from "../types";
-import { DASH, fmtDateTime, fmtTime, num, ruNum } from "../utils/format";
+import { DASH, dur, fmtDateTime, fmtTime, num, ruNum } from "../utils/format";
 import { EmptyState } from "./ui";
 import { LineChart as LineChartIcon } from "lucide-react";
 
@@ -102,11 +102,17 @@ export function SamplesChart({
   );
 
   if (rows.length === 0 || !hasValue) {
+    const from = samples[0]?.ts ?? null;
+    const to = samples[samples.length - 1]?.ts ?? null;
+    const avail =
+      from !== null && to !== null
+        ? `Фактически накоплено: ${fmtTime(from)} — ${fmtTime(to)} (${dur(to - from)}).`
+        : "";
     return (
       <EmptyState
         icon={LineChartIcon}
-        title="Недостаточно исторических данных"
-        hint="За выбранный период реальных образцов не получено. Отсутствующие значения не заполняются."
+        title="Недостаточно данных за выбранный период"
+        hint={`${avail} Отсутствующие значения не заполняются и не интерполируются.`}
         compact
       />
     );

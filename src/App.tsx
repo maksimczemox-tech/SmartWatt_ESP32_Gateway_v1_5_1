@@ -7,6 +7,7 @@ import { HomePage } from "./pages/HomePage";
 import { BatteryPage } from "./pages/BatteryPage";
 import { BmsPage } from "./pages/BmsPage";
 import { SolarPage } from "./pages/SolarPage";
+import { LoadPage } from "./pages/LoadPage";
 import { StatsPage } from "./pages/StatsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { EngineeringPage } from "./pages/EngineeringPage";
@@ -36,6 +37,7 @@ function Shell() {
               {page === "battery" && <BatteryPage />}
               {page === "bms" && <BmsPage />}
               {page === "solar" && <SolarPage />}
+              {page === "load" && <LoadPage />}
               {page === "stats" && <StatsPage />}
               {page === "settings" && <SettingsPage />}
               {page === "engineering" && <EngineeringPage />}

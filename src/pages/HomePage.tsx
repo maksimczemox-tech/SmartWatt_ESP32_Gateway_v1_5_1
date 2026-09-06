@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   BatteryCharging,
+  ChevronDown,
   Gauge,
   Plug,
   Server,
@@ -9,15 +10,16 @@ import {
   TimerReset,
 } from "lucide-react";
 import { useData, STALE_MS } from "../store/DataContext";
-import { Card, Metric, EmptyState, OnOffChip, SourceTag } from "../components/ui";
+import { Card, Metric, OnOffChip, SourceTag } from "../components/ui";
 import { EnergyScene, SunPanel, SysTile } from "../components/EnergyScene";
 import { SamplesChart, WindowSwitch, type SeriesDef } from "../components/charts";
 import { useSettings } from "../hooks/useSettings";
-import { useNow } from "../hooks/useNow";
 import {
   autonomy,
   chargeForecast,
   estimatedLoadPower,
+  integrateEnergyWh,
+  peakPower,
   type ForecastMode,
 } from "../utils/energy";
 import { apiOriginLabel } from "../services/api";
@@ -25,7 +27,7 @@ import { boolChip, chargeStateRu, fmt, fmtTime, hm, kwh, num, str, toBool } from
 
 const S_PV: SeriesDef = { key: "pv", name: "PV", color: "#FFC400", unit: "W" };
 const S_BATT: SeriesDef = { key: "batt", name: "АКБ", color: "#2F9BE8", unit: "W" };
-const S_LOAD: SeriesDef = { key: "load", name: "Нагрузка (расчет)", color: "#FF3D32", unit: "W" };
+const S_LOAD: SeriesDef = { key: "load", name: "Расчётная нагрузка", color: "#FF3D32", unit: "W" };
 
 /* ---------------- KPI-карточка ---------------- */
 
@@ -71,7 +73,7 @@ function Kpi({
       {children && <div className="mt-1.5 text-[10.5px] text-mut leading-relaxed">{children}</div>}
       {calc && (
         <span className="absolute right-2 top-2 text-[8px] tracking-[0.14em] uppercase text-mut/70 border border-line rounded-sm px-1 py-px">
-          расчет
+          расчёт
         </span>
       )}
     </div>
@@ -92,7 +94,7 @@ function ConnBanner() {
         <div>
           <div className="font-display font-semibold text-[13.5px] tracking-wide text-bad">НЕТ СВЯЗИ С GATEWAY</div>
           <div className="text-[11.5px] text-mut mt-0.5">
-            ESP32 недоступен. Идёт опрос HTTP API и переподключение WebSocket (порт 81).
+            Ошибка получения данных. Идёт опрос HTTP API и переподключение WebSocket (порт 81).
             <span className="num ml-1.5 text-mut/80">{apiOriginLabel()}</span>
           </div>
         </div>
@@ -128,21 +130,97 @@ function StaleMark() {
   );
 }
 
+/* ---------------- раскрываемые дополнительные параметры ---------------- */
+
+function ExtraParams() {
+  const { data, bms, bmsState } = useData();
+  const [open, setOpen] = useState(false);
+
+  const cells = data?.bmsCells ?? bms?.cells ?? null;
+  const minCell = num(data?.bmsMinCellVoltage) ?? num(bms?.min_cell_v);
+  const maxCell = num(data?.bmsMaxCellVoltage) ?? num(bms?.max_cell_v);
+  const deltaCell = num(data?.bmsDeltaCellVoltage) ?? num(bms?.delta_cell_v);
+  const avgCell = num(data?.bmsAverageCellVoltage) ?? (cells && cells.some((c) => c !== null)
+    ? (cells.filter((c): c is number => c !== null).reduce((s, c) => s + c, 0) /
+        cells.filter((c) => c !== null).length)
+    : null);
+
+  const Row = ({ k, children }: { k: string; children: ReactNode }) => (
+    <div className="flex items-baseline justify-between gap-3 py-[4px] border-b border-line/40 last:border-0">
+      <span className="text-[11px] text-mut">{k}</span>
+      <span className="num text-[11.5px] text-ink text-right">{children}</span>
+    </div>
+  );
+
+  return (
+    <div className="reveal rounded-lg border border-line bg-panel overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-panel2/60 border-b border-line/0 hover:bg-panel2 transition-colors"
+      >
+        <ChevronDown size={14} className={`text-acc2 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+        <span className="font-display font-semibold text-[12px] tracking-[0.14em] uppercase text-ink/90">
+          Дополнительные параметры
+        </span>
+        <span className="ml-auto num text-[10px] text-mut">только реальные значения</span>
+      </button>
+      {open && (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 px-3.5 py-3 page-anim">
+          <div>
+            <div className="text-[9.5px] tracking-[0.16em] uppercase text-mut mb-1">Аккумулятор</div>
+            <Row k="Остаточная ёмкость">{fmt(num(data?.bmsRemainingAh) ?? num(bms?.remaining_ah), 1)} Ah</Row>
+            <Row k="Полная ёмкость">{fmt(num(data?.bmsFullCapacityAh) ?? num(bms?.full_capacity_ah), 1)} Ah</Row>
+            <Row k="Температура АКБ">{fmt(data?.batteryTemp, 1)} °C</Row>
+            <Row k="Циклы">{fmt(num(data?.bmsCycles) ?? num(bms?.cycles), 0)}</Row>
+            <Row k="Глубокие разряды">{fmt(data?.overDischarges, 0)}</Row>
+            <Row k="Полные заряды">{fmt(data?.fullCharges, 0)}</Row>
+          </div>
+          <div>
+            <div className="text-[9.5px] tracking-[0.16em] uppercase text-mut mb-1">Ячейки</div>
+            <Row k="Количество ячеек">{fmt(num(data?.bmsCellCount) ?? num(bms?.cell_count), 0)}</Row>
+            <Row k="Минимальная ячейка">{fmt(minCell, 3)} V</Row>
+            <Row k="Максимальная ячейка">{fmt(maxCell, 3)} V</Row>
+            <Row k="Разбаланс">{deltaCell === null ? "—" : `${fmt(deltaCell * 1000, 0)} mV`}</Row>
+            <Row k="Среднее напряжение">{fmt(avgCell, 3)} V</Row>
+          </div>
+          <div>
+            <div className="text-[9.5px] tracking-[0.16em] uppercase text-mut mb-1">Состояние BMS</div>
+            <Row k="BMS">
+              {bmsState === "ONLINE" ? "В СЕТИ" : bmsState === "OFFLINE" ? "НЕТ СВЯЗИ" : bmsState === "STALE" ? "ДАННЫЕ УСТАРЕЛИ" : "НЕТ ДАННЫХ"}
+            </Row>
+            <Row k="Защита (код)">{fmt(num(data?.bmsProtection) ?? num(bms?.protection), 0)}</Row>
+            <Row k="Состояние защиты">
+              {(() => {
+                const code = num(data?.bmsProtection) ?? num(bms?.protection);
+                const text = str(data?.bmsProtectionText) !== "—" ? str(data?.bmsProtectionText) : str(bms?.protection_text);
+                if (code === null) return "Нет данных";
+                if (code === 0) return "Нет защиты";
+                return text !== "—" ? text : `Активная защита (код ${fmt(code, 0)})`;
+              })()}
+            </Row>
+            <Row k="Зарядный FET">{boolChip(num(data?.bmsChargeFet) ?? toBool(bms?.charge_fet)) === null ? "Нет данных" : boolChip(num(data?.bmsChargeFet) ?? toBool(bms?.charge_fet)) === "ON" ? "ВКЛ" : "ВЫКЛ"}</Row>
+            <Row k="Разрядный FET">{boolChip(num(data?.bmsDischargeFet) ?? toBool(bms?.discharge_fet)) === null ? "Нет данных" : boolChip(num(data?.bmsDischargeFet) ?? toBool(bms?.discharge_fet)) === "ON" ? "ВКЛ" : "ВЫКЛ"}</Row>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------- главная ---------------- */
 
 export function HomePage() {
-  const { data, status, samples, sessionStart, conn, telemetryState, bmsState, controllerState } = useData();
+  const { data, status, bat, samples, sessionStart, conn, telemetryState, bmsState, controllerState } = useData();
   const [settings, setSettings] = useSettings();
-  const now = useNow(1000);
-  void now;
 
   const [windowH, setWindowH] = useState<number | null>(1);
 
   const pv = num(data?.pvPower);
-  const batt = num(data?.bmsPower);
+  const batt = bat.power;
   const load = estimatedLoadPower(pv, batt);
-  const soc = num(data?.batterySOC ?? data?.bmsSOC);
-  const charging = (batt ?? 0) > 0;
+  const soc = bat.soc;
+  const charging = batt !== null && batt > 0;
 
   const bmsAge = num(data?.bmsDataAgeMs ?? status?.bms_data_age_ms);
   const bmsStale = bmsAge !== null && bmsAge > STALE_MS;
@@ -151,28 +229,31 @@ export function HomePage() {
     () =>
       chargeForecast({
         soc,
-        remainingAh: num(data?.bmsRemainingAh),
-        fullAh: num(data?.bmsFullCapacityAh),
-        voltage: num(data?.batteryVoltage ?? data?.bmsVoltage),
+        remainingAh: bat.remainingAh,
+        fullAh: bat.fullAh,
+        voltage: bat.voltage,
         currentPower: batt,
         samples,
         mode: settings.forecastMode,
         bmsStale,
       }),
-    [soc, data?.bmsRemainingAh, data?.bmsFullCapacityAh, data?.batteryVoltage, data?.bmsVoltage, batt, samples, settings.forecastMode, bmsStale],
+    [soc, bat.remainingAh, bat.fullAh, bat.voltage, batt, samples, settings.forecastMode, bmsStale],
   );
 
   const auto = useMemo(
     () =>
       autonomy({
         soc,
-        fullAh: num(data?.bmsFullCapacityAh),
-        voltage: num(data?.batteryVoltage ?? data?.bmsVoltage),
+        fullAh: bat.fullAh,
+        voltage: bat.voltage,
         loadW: load,
         minSoc: settings.minSoc,
       }),
-    [soc, data?.bmsFullCapacityAh, data?.batteryVoltage, data?.bmsVoltage, load, settings.minSoc],
+    [soc, bat.fullAh, bat.voltage, load, settings.minSoc],
   );
+
+  const pvToday = useMemo(() => integrateEnergyWh(samples, "pv"), [samples]);
+  const pvPeak = useMemo(() => peakPower(samples, "pv"), [samples]);
 
   const fault = toBool(data?.fault);
 
@@ -214,48 +295,48 @@ export function HomePage() {
           delay={40}
         >
           {batt === null
-            ? "Нет данных BMS"
+            ? "Нет данных"
             : charging
               ? "Аккумулятор заряжается"
               : batt < 0
                 ? "Аккумулятор разряжается"
-                : "НЕТ ЗАРЯДА"}
+                : "Заряд не идёт"}
           <StaleMark />
         </Kpi>
 
-        <Kpi label="Расчетная нагрузка" value={fmt(load, 0)} unitStr="W" tone="bad" icon={<Plug size={14} />} delay={60} calc>
-          Источник: PV − BMS
-          <div>max(0, {fmt(pv, 0)} − {batt === null ? "—" : fmt(batt, 0)})</div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span>Выход LOAD:</span>
-            <OnOffChip value={boolChip(data?.loadState)} />
-          </div>
+        <Kpi label="Расчётная нагрузка" value={fmt(load, 0)} unitStr="W" tone="bad" icon={<Plug size={14} />} delay={60} calc>
+          Источник: PV − АКБ
+          <div className="num">max(0, {fmt(pv, 0)} − {batt === null ? "—" : fmt(batt, 0)})</div>
+          {load === null && <div className="text-warn">Недостаточно данных</div>}
         </Kpi>
 
         <Kpi label="Автономность" value={auto.kind === "ok" ? hm(auto.hours) : "—"} tone="acc" icon={<Gauge size={14} />} delay={80} calc>
           {auto.kind === "ok" && (
             <>
               Доступно: {fmt(auto.usableWh, 0)} Wh · мин. SOC {auto.minSoc}%
+              <div>Расчёт по текущей нагрузке</div>
             </>
           )}
-          {auto.kind === "no-load" && "Нагрузка отсутствует"}
+          {auto.kind === "no-load" && "Нагрузка не обнаружена"}
           {auto.kind === "below-min" && `Заряд ниже порога ${auto.minSoc}%`}
-          {auto.kind === "insufficient" && "Недостаточно данных для расчета"}
+          {auto.kind === "insufficient" && "Недостаточно данных"}
           <StaleMark />
         </Kpi>
 
-        <Kpi label="До полной зарядки" value={forecast.kind === "ok" ? hm(forecast.hours) : "—"} tone="ok" icon={<TimerReset size={14} />} delay={100} calc>
+        <Kpi label="Расчётное время до 100%" value={forecast.kind === "ok" ? hm(forecast.hours) : "—"} tone="ok" icon={<TimerReset size={14} />} delay={100} calc>
           {forecast.kind === "ok" && (
             <>
               Осталось: {fmt(forecast.remainingAh, 1)} Ah · {fmt(forecast.remainingWh, 0)} Wh
-              <div>Мощность: {fmt(forecast.powerUsed, 0)} W ({forecast.mode === "average" ? "средняя" : "текущая"})</div>
+              <div>
+                {forecast.mode === "average" && !forecast.note ? "Расчёт по средней мощности" : "Расчёт по текущей мощности"} · {fmt(forecast.powerUsed, 0)} W
+              </div>
               {forecast.note && <div className="text-warn">{forecast.note}</div>}
             </>
           )}
-          {forecast.kind === "not-charging" && "Заряд не выполняется"}
-          {forecast.kind === "full" && "Аккумулятор полностью заряжен"}
+          {forecast.kind === "not-charging" && "Заряд не идёт"}
+          {forecast.kind === "full" && "Заряжено"}
           {forecast.kind === "stale" && "Данные BMS устарели"}
-          {forecast.kind === "insufficient" && "Недостаточно данных для прогноза"}
+          {forecast.kind === "insufficient" && "Недостаточно данных"}
           {forecast.kind === "ok" && (
             <div className="flex gap-1 mt-1">
               {(
@@ -306,43 +387,47 @@ export function HomePage() {
       >
         <SamplesChart samples={samples} series={[S_PV, S_BATT, S_LOAD]} windowHours={windowH} sessionStart={sessionStart} height={225} />
         <p className="text-[10px] text-mut/70 mt-2 leading-relaxed">
-          Только реально полученные фреймы (WebSocket / опрос). История доступна с момента запуска интерфейса ({fmtTime(sessionStart)}).
-          Нагрузка — расчетная: max(0, PV − BMS).
+          Только реально полученные фреймы (WebSocket / опрос). Расчётная нагрузка = max(0, PV − АКБ);
+          поле loadPower контроллера не используется. История доступна с момента запуска интерфейса ({fmtTime(sessionStart)}).
         </p>
       </Card>
 
       {/* ОТЧЁТ + СТАТУС */}
       <div className="grid lg:grid-cols-2 gap-3 mt-3">
-        <Card title="Отчет производства энергии" icon={<Sun size={13} />} delay={140}>
+        <Card title="Отчёт производства энергии" icon={<Sun size={13} />} delay={140}>
+          <div className="grid grid-cols-2 gap-2.5 mb-3">
+            <div className="rounded border border-line bg-panel2/70 px-3 py-2.5">
+              <div className="text-[9.5px] tracking-[0.14em] uppercase text-mut">Сегодня · солнечная энергия</div>
+              <div className="num font-semibold text-[19px] mt-1">
+                {pvToday === null ? <span className="text-[12px] text-mut font-normal">Недостаточно данных</span> : kwh(pvToday.wh, 3)}
+              </div>
+              <div className="text-[9.5px] text-mut/70 mt-0.5">
+                {pvToday === null
+                  ? "по полученным образцам"
+                  : `по полученным образцам: ${fmtTime(pvToday.fromTs)} — ${fmtTime(pvToday.toTs)}`}
+              </div>
+            </div>
+            <div className="rounded border border-line bg-panel2/70 px-3 py-2.5">
+              <div className="text-[9.5px] tracking-[0.14em] uppercase text-mut">Пиковая мощность PV</div>
+              <div className="num font-semibold text-[19px] mt-1">
+                {pvPeak === null ? <span className="text-[12px] text-mut font-normal">Нет данных</span> : `${fmt(pvPeak, 1)} W`}
+              </div>
+              <div className="text-[9.5px] text-mut/70 mt-0.5">максимум по полученным образцам</div>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-x-6">
-            <Metric label="Заряд за день" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh"
-              sub={<span>Энергия, переданная в аккумулятор</span>} />
-            <Metric label="Нагрузка за день" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
+            <Metric label="Энергия в аккумулятор (день)" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh"
+              sub={<span>Счётчик прошивки · {data?.dailyChargeWh === null || data?.dailyChargeWh === undefined ? "" : kwh(data.dailyChargeWh)}</span>} />
+            <Metric label="Энергия на нагрузку (день)" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
             <Metric label="Всего в аккумулятор" value={data?.totalChargeWh} digits={0} unitStr="Wh" source="/api/data · totalChargeWh"
               sub={<span className="num">{kwh(data?.totalChargeWh)}</span>} />
             <Metric label="Всего на нагрузку" value={data?.totalLoadWh} digits={0} unitStr="Wh" source="/api/data · totalLoadWh"
               sub={<span className="num">{kwh(data?.totalLoadWh)}</span>} />
           </div>
-          <div className="mt-3 pt-2.5 border-t border-line/60">
-            {(
-              [
-                ["Сегодня", num(data?.dailyChargeWh)],
-                ["Вчера", null],
-                ["7 дней", null],
-                ["30 дней", null],
-              ] as [string, number | null][]
-            ).map(([label, v]) => (
-              <div key={label} className="flex items-baseline justify-between py-[4px] border-b border-line/40 last:border-0">
-                <span className="text-[11px] text-mut">{label}</span>
-                <span className="num text-[12px] text-ink">
-                  {v === null ? (label === "Сегодня" ? "Недостаточно данных" : "Недостаточно данных для отчета") : kwh(v)}
-                </span>
-              </div>
-            ))}
-            <p className="text-[9.5px] text-mut/70 mt-2 leading-relaxed">
-              Солнечная генерация и заряд аккумулятора — разные величины: здесь энергия, переданная в аккумулятор (счетчики прошивки).
-            </p>
-          </div>
+          <p className="text-[9.5px] text-mut/70 mt-2.5 leading-relaxed">
+            Солнечная генерация и энергия заряда — разные величины и не смешиваются.
+            Периоды «вчера / 7 / 30 дней» прошивка не предоставляет: недостаточных данных не показываем.
+          </p>
         </Card>
 
         <Card title="Статус системы" icon={<Server size={13} />} delay={160}>
@@ -388,6 +473,10 @@ export function HomePage() {
         </Card>
       </div>
 
+      <div className="mt-3">
+        <ExtraParams />
+      </div>
+
       {/* источники для инженерного режима */}
       <div className="mt-3">
         <SourceHints />
@@ -397,16 +486,16 @@ export function HomePage() {
 }
 
 function SourceHints() {
-  const { showSources, data } = useData();
+  const { showSources, data, bat } = useData();
   if (!showSources) return null;
   return (
     <Card title="Источники параметров (инженерная информация)" icon={<Activity size={13} />}>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
         <div><Metric label="Мощность PV" value={data?.pvPower} digits={1} unitStr="W" source="/api/data · pvPower (измерено)" /></div>
-        <div><Metric label="Мощность BMS" value={data?.bmsPower} digits={1} unitStr="W" sign source="/api/data · bmsPower (измерено)" /></div>
+        <div><Metric label="Мощность АКБ" value={bat.power} digits={1} unitStr="W" sign source="/api/data · bmsPower → /api/bms · power (измерено)" /></div>
         <div>
-          <Metric label="Расчетная нагрузка" value={estimatedLoadPower(num(data?.pvPower), num(data?.bmsPower))} digits={1} unitStr="W" source="расчет · max(0, pvPower − bmsPower)" />
-          <SourceTag source="формула: max(0, PV − BMS)" />
+          <Metric label="Расчётная нагрузка" value={estimatedLoadPower(num(data?.pvPower), bat.power)} digits={1} unitStr="W" source="расчёт · max(0, PV − АКБ)" />
+          <SourceTag source="loadPower контроллера не используется" />
         </div>
       </div>
     </Card>

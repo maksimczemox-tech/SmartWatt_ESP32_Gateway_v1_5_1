@@ -23,6 +23,17 @@ export function BmsPage() {
   const { bms, bmsState } = useData();
   const diag = bms?.diagnostics ?? null;
 
+  /* Состояние защиты: только реальный смысл кода. */
+  const protCode = bms?.protection ?? null;
+  const protectionLabel =
+    protCode === null || protCode === undefined
+      ? "Нет данных"
+      : protCode === 0
+        ? "Нет защиты"
+        : str(bms?.protection_text) !== "—"
+          ? str(bms?.protection_text)
+          : `Активная защита (код ${fmt(protCode, 0)})`;
+
   return (
     <div>
       {/* телеметрия JBD BMS */}
@@ -55,9 +66,7 @@ export function BmsPage() {
           <span>
             Защита (код): <span className="num text-ink">{fmt(bms?.protection, 0)}</span>
           </span>
-          <span className="truncate">
-            {str(bms?.protection_text) !== "—" ? str(bms?.protection_text) : "Неизвестная защита / неисправность"}
-          </span>
+          <span className="truncate">{protectionLabel}</span>
         </div>
       </Card>
 
@@ -101,9 +110,7 @@ export function BmsPage() {
             </KV>
             <KV k="Режим работы">{str(bms?.operation)}</KV>
             <KV k="Код защиты">{fmt(bms?.protection, 0)}</KV>
-            <KV k="Состояние защиты">
-              {str(bms?.protection_text) !== "—" ? str(bms?.protection_text) : "Неизвестная защита / неисправность"}
-            </KV>
+            <KV k="Состояние защиты">{protectionLabel}</KV>
           </Card>
 
           {/* температуры */}

@@ -23,7 +23,8 @@ const DEFAULTS: UserSettings = {
   lat: null,
   lon: null,
   minSoc: 20,
-  forecastMode: "current",
+  /* предпочтительна средняя мощность заряда по реальным samples */
+  forecastMode: "average",
 };
 
 function clampNum(v: unknown, min: number, max: number): number | null {

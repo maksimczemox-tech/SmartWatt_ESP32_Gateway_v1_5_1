@@ -107,6 +107,16 @@ interface DataContextValue {
   bmsState: SubsystemState;
   controllerState: SubsystemState;
 
+  /**
+   * Показания АКБ с логичным приоритетом источников (только реальные значения):
+   *   SOC:        data.batterySOC → data.bmsSOC → /api/bms soc
+   *   Мощность:   data.bmsPower → /api/bms power
+   *   Напряжение: data.batteryVoltage → data.bmsVoltage → /api/bms voltage
+   *   Ёмкости:    data.bms*Ah → /api/bms
+   * Если ни одного реального источника нет — null («Нет данных»).
+   */
+  bat: BatteryDerived;
+
   /** Реально полученные samples (ring buffer). Момент запуска интерфейса. */
   samples: SamplePoint[];
   sessionStart: number;
@@ -122,6 +132,17 @@ interface DataContextValue {
   resetDiagnostics: () => Promise<void>;
   refreshTelemetry: () => Promise<void>;
   setShowSources: (v: boolean) => void;
+}
+
+export interface BatteryDerived {
+  soc: number | null;
+  voltage: number | null;
+  current: number | null;
+  power: number | null;
+  remainingAh: number | null;
+  fullAh: number | null;
+  temp: number | null;
+  cycles: number | null;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
@@ -302,6 +323,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [now],
   );
 
+  /* Показания АКБ: приоритет телеметрии /api/data, затем реальные данные /api/bms. */
+  const bat = useMemo<BatteryDerived>(
+    () => ({
+      soc: num(data?.batterySOC) ?? num(data?.bmsSOC) ?? num(bms?.soc),
+      voltage: num(data?.batteryVoltage) ?? num(data?.bmsVoltage) ?? num(bms?.voltage),
+      current: num(data?.batteryCurrent) ?? num(bms?.current),
+      power: num(data?.bmsPower) ?? num(bms?.power),
+      remainingAh: num(data?.bmsRemainingAh) ?? num(bms?.remaining_ah),
+      fullAh: num(data?.bmsFullCapacityAh) ?? num(bms?.full_capacity_ah),
+      temp: num(data?.batteryTemp),
+      cycles: num(data?.bmsCycles) ?? num(bms?.cycles),
+    }),
+    [data, bms],
+  );
+
   /* ---------------- действия (единственный путь UI → Gateway) ---------------- */
 
   const fetchEngineering = useCallback(async () => {
@@ -379,6 +415,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       telemetryState,
       bmsState,
       controllerState,
+      bat,
       samples,
       sessionStart,
       fetchEngineering,
@@ -409,6 +446,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       telemetryState,
       bmsState,
       controllerState,
+      bat,
       samples,
       sessionStart,
       fetchEngineering,

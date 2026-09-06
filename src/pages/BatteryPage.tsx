@@ -5,19 +5,23 @@ import { BatteryVisual } from "../components/BatteryVisual";
 import { fmt, num, str } from "../utils/format";
 
 export function BatteryPage() {
-  const { data } = useData();
-  const charging = (num(data?.chargePower) ?? 0) > 0;
+  const { data, bat } = useData();
+  const charging = (bat.power ?? num(data?.chargePower) ?? 0) > 0;
 
   return (
     <div>
       {/* верхний блок телеметрии */}
       <Card title="Батарея · телеметрия" icon={<BatteryCharging size={13} />} delay={0}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          <Metric label="Заряд батареи (SOC)" value={data?.batterySOC} digits={1} unitStr="%" size="lg" tone="ok" source="/api/data · batterySOC" />
-          <Metric label="Напряжение батареи" value={data?.batteryVoltage} digits={2} unitStr="V" size="lg" source="/api/data · batteryVoltage" />
-          <Metric label="Ток батареи" value={data?.batteryCurrent} digits={2} unitStr="A" sign source="/api/data · batteryCurrent" />
-          <Metric label="Мощность батареи" value={data?.bmsPower} digits={1} unitStr="W" sign source="/api/data · bmsPower" sub={<span>источник: BMS (поле bmsPower)</span>} />
-          <Metric label="Температура батареи" value={data?.batteryTemp} digits={1} unitStr="°C" source="/api/data · batteryTemp" />
+          <Metric label="Заряд батареи (SOC)" value={bat.soc} digits={1} unitStr="%" size="lg" tone="ok"
+            source="/api/data · batterySOC → bmsSOC → /api/bms · soc" />
+          <Metric label="Напряжение батареи" value={bat.voltage} digits={2} unitStr="V" size="lg"
+            source="/api/data · batteryVoltage → bmsVoltage → /api/bms" />
+          <Metric label="Ток батареи" value={bat.current} digits={2} unitStr="A" sign
+            source="/api/data · batteryCurrent → /api/bms · current" />
+          <Metric label="Мощность батареи" value={bat.power} digits={1} unitStr="W" sign
+            source="/api/data · bmsPower → /api/bms · power" sub={<span>источник: BMS; &gt;0 заряд, &lt;0 разряд</span>} />
+          <Metric label="Температура батареи" value={bat.temp} digits={1} unitStr="°C" source="/api/data · batteryTemp" />
         </div>
       </Card>
 
@@ -34,7 +38,7 @@ export function BatteryPage() {
           }
         >
           <div className="py-2">
-            <BatteryVisual soc={data?.batterySOC} charging={charging} height={212} />
+            <BatteryVisual soc={bat.soc} charging={charging} height={212} />
           </div>
           <div className="mt-3 border-t border-line/60 pt-2">
             <KV k="Состояние заряда">{str(data?.chargeState)}</KV>
@@ -84,10 +88,10 @@ export function BatteryPage() {
       {/* ёмкость и циклы — только если реально доступны */}
       <Card title="Ёмкость и циклы (данные BMS)" icon={<RotateCw size={13} />} delay={200} className="mt-3">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Metric label="Оставшаяся ёмкость" value={data?.bmsRemainingAh} digits={1} unitStr="Ah" source="/api/data · bmsRemainingAh" />
-          <Metric label="Полная ёмкость" value={data?.bmsFullCapacityAh} digits={1} unitStr="Ah" source="/api/data · bmsFullCapacityAh" />
-          <Metric label="Количество циклов" value={data?.bmsCycles} digits={0} source="/api/data · bmsCycles" />
-          <Metric label="SOC по данным BMS" value={data?.bmsSOC} digits={0} unitStr="%" source="/api/data · bmsSOC" />
+          <Metric label="Оставшаяся ёмкость" value={bat.remainingAh} digits={1} unitStr="Ah" source="/api/data · bmsRemainingAh → /api/bms" />
+          <Metric label="Полная ёмкость" value={bat.fullAh} digits={1} unitStr="Ah" source="/api/data · bmsFullCapacityAh → /api/bms" />
+          <Metric label="Количество циклов" value={bat.cycles} digits={0} source="/api/data · bmsCycles → /api/bms" />
+          <Metric label="SOC по данным BMS" value={num(data?.bmsSOC) ?? num(bat.soc)} digits={0} unitStr="%" source="/api/data · bmsSOC" />
         </div>
         <p className="text-[10.5px] text-mut/70 mt-3">
           Значения поступают от JBD BMS через Gateway. Если BMS не отвечает, отображается «—».

@@ -3,6 +3,7 @@ import {
   BatteryCharging,
   CircuitBoard,
   Home,
+  Plug,
   Settings,
   Sun,
   Wrench,
@@ -13,13 +14,14 @@ import { apiOriginLabel } from "../services/api";
 import { SubsystemChip } from "./ui";
 import type { SubsystemState } from "../types";
 
-export type PageId = "home" | "battery" | "bms" | "solar" | "stats" | "settings" | "engineering";
+export type PageId = "home" | "battery" | "bms" | "solar" | "load" | "stats" | "settings" | "engineering";
 
 export const NAV_ITEMS: { id: PageId; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Главная", icon: Home },
   { id: "battery", label: "Батарея", icon: BatteryCharging },
   { id: "bms", label: "BMS", icon: CircuitBoard },
-  { id: "solar", label: "Солнце", icon: Sun },
+  { id: "solar", label: "Солнце (PV)", icon: Sun },
+  { id: "load", label: "Нагрузка", icon: Plug },
   { id: "stats", label: "Статистика", icon: BarChart3 },
   { id: "settings", label: "Настройки", icon: Settings },
   { id: "engineering", label: "Инженерный режим", icon: Wrench },
