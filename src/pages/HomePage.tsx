@@ -290,7 +290,7 @@ export function HomePage() {
           label={charging ? "Заряд аккумулятора" : "Аккумулятор"}
           value={batt === null ? "—" : `${batt > 0 ? "+" : ""}${fmt(batt, 0)}`}
           unitStr="W"
-          tone={charging ? "ok" : (batt ?? 0) < 0 ? "bad" : "default"}
+          tone={charging ? "ok" : batt !== null && batt < 0 ? "bad" : "default"}
           icon={<BatteryCharging size={14} />}
           delay={40}
         >
@@ -318,7 +318,7 @@ export function HomePage() {
             </>
           )}
           {auto.kind === "no-load" && "Нагрузка не обнаружена"}
-          {auto.kind === "below-min" && `Заряд ниже порога ${auto.minSoc}%`}
+          {auto.kind === "below-min" && "Минимальный SOC достигнут"}
           {auto.kind === "insufficient" && "Недостаточно данных"}
           <StaleMark />
         </Kpi>
@@ -416,9 +416,8 @@ export function HomePage() {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-x-6">
-            <Metric label="Энергия в аккумулятор (день)" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh"
-              sub={<span>Счётчик прошивки · {data?.dailyChargeWh === null || data?.dailyChargeWh === undefined ? "" : kwh(data.dailyChargeWh)}</span>} />
-            <Metric label="Энергия на нагрузку (день)" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
+          <Metric label="Энергия заряда АКБ (день)" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh"
+            sub={<span>Энергия, переданная в аккумулятор · {data?.dailyChargeWh === null || data?.dailyChargeWh === undefined ? "" : kwh(data.dailyChargeWh)}</span>} />            <Metric label="Энергия на нагрузку (день)" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
             <Metric label="Всего в аккумулятор" value={data?.totalChargeWh} digits={0} unitStr="Wh" source="/api/data · totalChargeWh"
               sub={<span className="num">{kwh(data?.totalChargeWh)}</span>} />
             <Metric label="Всего на нагрузку" value={data?.totalLoadWh} digits={0} unitStr="Wh" source="/api/data · totalLoadWh"

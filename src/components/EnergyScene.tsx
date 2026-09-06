@@ -133,6 +133,7 @@ export function EnergyScene() {
   const discharging = batt !== null && batt < 0;
 
   const beamOn = pv !== null && pv > 0;
+  const beamW = beamOn && pv !== null ? pv : 0; /* визуальный параметр линии, не данные */
   /* Панели → АКБ: при заряде — мощность заряда; при разряде PV питает шину */
   const flowPB = beamOn ? (charging ? batt : pv) : null;
   const flowPBLabel = charging ? "заряд" : "питание";
@@ -253,10 +254,10 @@ export function EnergyScene() {
           x2={196}
           y2={404}
           stroke="#FFC400"
-          strokeWidth={beamOn ? flowWidth(pv ?? 0) : 1}
+          strokeWidth={beamOn ? flowWidth(beamW) : 1}
           strokeDasharray="3 9"
           className={beamOn ? "flow-anim" : ""}
-          style={{ opacity: beamOn ? 0.85 : 0.12, transition: "opacity .8s", ...(beamOn ? { ["--dur" as string]: `${flowDur(pv ?? 0)}s` } : {}) }}
+          style={{ opacity: beamOn ? 0.85 : 0.12, transition: "opacity .8s", ...(beamOn ? { ["--dur" as string]: `${flowDur(beamW)}s` } : {}) }}
         />
       )}
 
@@ -315,9 +316,9 @@ export function EnergyScene() {
       {/* ===== РАСЧЁТНАЯ НАГРУЗКА (справа) ===== */}
       <g>
         <rect x="660" y="380" width="180" height="84" rx="6" fill="#101B25" stroke={flowBL !== null ? "#FF3D3266" : "#27404F"} strokeWidth="1.5" />
-        <circle cx="690" cy="422" r="13" fill="none" stroke={(load ?? 0) > 0 ? "#FF3D32" : "#27404F"} strokeWidth="2" />
-        <circle cx="690" cy="422" r="4" fill={(load ?? 0) > 0 ? "#FF3D32" : "#27404F"} />
-        <text x="766" y="416" textAnchor="middle" fontSize={22} fill={(load ?? 0) > 0 ? "#FF3D32" : "#8A969F"} className="svg-num" fontWeight={700}>
+        <circle cx="690" cy="422" r="13" fill="none" stroke={load !== null && load > 0 ? "#FF3D32" : "#27404F"} strokeWidth="2" />
+        <circle cx="690" cy="422" r="4" fill={load !== null && load > 0 ? "#FF3D32" : "#27404F"} />
+        <text x="766" y="416" textAnchor="middle" fontSize={22} fill={load !== null && load > 0 ? "#FF3D32" : "#8A969F"} className="svg-num" fontWeight={700}>
           {load === null ? "—" : `${fmt(load, 0)} W`}
         </text>
         <text x="766" y="436" textAnchor="middle" fontSize={9.5} fill="#8A969F" className="svg-label">источник: PV − АКБ</text>
@@ -427,7 +428,8 @@ export function SunPanel() {
         </div>
       ))}
       <div className="text-[9.5px] text-mut/70 mt-2 leading-relaxed">
-        Расчётное значение: координаты {ruNum(settings.lat ?? 0, 4)}°, {ruNum(settings.lon ?? 0, 4)}° · часовой пояс браузера
+        Расчётное значение: координаты {settings.lat !== null ? ruNum(settings.lat, 4) : "—"}°,{" "}
+        {settings.lon !== null ? ruNum(settings.lon, 4) : "—"}° · часовой пояс браузера
       </div>
     </Card>
   );

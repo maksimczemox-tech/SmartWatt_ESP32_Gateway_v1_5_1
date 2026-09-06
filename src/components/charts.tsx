@@ -106,7 +106,7 @@ export function SamplesChart({
     const to = samples[samples.length - 1]?.ts ?? null;
     const avail =
       from !== null && to !== null
-        ? `Фактически накоплено: ${fmtTime(from)} — ${fmtTime(to)} (${dur(to - from)}).`
+        ? `Доступно истории: ${dur(to - from)} (реальные samples с ${fmtTime(from)} до ${fmtTime(to)}).`
         : "";
     return (
       <EmptyState
@@ -132,8 +132,19 @@ export function SamplesChart({
       : `${p(d.getHours())}:${p(d.getMinutes())}`;
   };
 
+  /* честно сообщаем, если выбранное окно больше реально накопленного периода */
+  const availSpan = samples.length > 1 ? samples[samples.length - 1].ts - samples[0].ts : null;
+  const shortCoverage =
+    windowHours !== null && availSpan !== null && windowHours * 3_600_000 > availSpan + 60_000;
+
   return (
-    <div style={{ height }} className="w-full">
+    <div className="w-full">
+      {shortCoverage && (
+        <div className="num text-[9.5px] text-mut mb-1">
+          Доступно истории: {dur(availSpan)} — период короче выбранного окна, пропуски не заполняются
+        </div>
+      )}
+      <div style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="#1A2A35" strokeOpacity={0.7} vertical={false} />
@@ -176,6 +187,7 @@ export function SamplesChart({
           ))}
         </LineChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

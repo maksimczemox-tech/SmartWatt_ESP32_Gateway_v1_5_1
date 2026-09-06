@@ -328,7 +328,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     () => ({
       soc: num(data?.batterySOC) ?? num(data?.bmsSOC) ?? num(bms?.soc),
       voltage: num(data?.batteryVoltage) ?? num(data?.bmsVoltage) ?? num(bms?.voltage),
-      current: num(data?.batteryCurrent) ?? num(bms?.current),
+      current: num(data?.batteryCurrent) ?? num(data?.bmsCurrent) ?? num(bms?.current),
       power: num(data?.bmsPower) ?? num(bms?.power),
       remainingAh: num(data?.bmsRemainingAh) ?? num(bms?.remaining_ah),
       fullAh: num(data?.bmsFullCapacityAh) ?? num(bms?.full_capacity_ah),

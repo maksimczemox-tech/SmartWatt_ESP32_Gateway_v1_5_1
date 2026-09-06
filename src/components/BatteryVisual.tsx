@@ -47,6 +47,17 @@ export function BatteryVisual({
             />
           ))}
 
+          {/* SOC неизвестен: нейтральная штриховка — это НЕ 0% */}
+          {p === null && (
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  "repeating-linear-gradient(45deg, rgba(138,150,159,0.10) 0 6px, transparent 6px 12px)",
+              }}
+            />
+          )}
+
           {/* заполнение = реальный SOC */}
           {p !== null && (
             <div
