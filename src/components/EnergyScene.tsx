@@ -125,16 +125,16 @@ const STARS = Array.from({ length: 26 }, (_, i) => ({
 }));
 
 export function EnergyScene() {
-  const { data, bmsState, bat } = useData();
-  const [settings] = useSettings();
+  const { data, bmsState, bat, espConfig } = useData();
   const now = useNow(1000);
 
+  /* Координаты — из настроек Gateway (NVS), не из браузера. */
+  const lat = num(espConfig?.latitude);
+  const lon = num(espConfig?.longitude);
+
   const sun: SunInfo | null = useMemo(
-    () =>
-      settings.lat !== null && settings.lon !== null
-        ? sunInfo(new Date(now), settings.lat, settings.lon)
-        : null,
-    [now, settings.lat, settings.lon],
+    () => (lat !== null && lon !== null ? sunInfo(new Date(now), lat, lon) : null),
+    [now, lat, lon],
   );
 
   const pv = num(data?.pvPower);
@@ -396,14 +396,14 @@ export function EnergyScene() {
 /* ---------------- панель параметров Солнца ---------------- */
 
 export function SunPanel() {
-  const [settings] = useSettings();
+  const { espConfig } = useData();
   const now = useNow(1000);
+  /* Координаты — из настроек Gateway (NVS), не из браузера. */
+  const lat = num(espConfig?.latitude);
+  const lon = num(espConfig?.longitude);
   const sun = useMemo(
-    () =>
-      settings.lat !== null && settings.lon !== null
-        ? sunInfo(new Date(now), settings.lat, settings.lon)
-        : null,
-    [now, settings.lat, settings.lon],
+    () => (lat !== null && lon !== null ? sunInfo(new Date(now), lat, lon) : null),
+    [now, lat, lon],
   );
 
   if (sun === null) {
@@ -475,8 +475,9 @@ export function SunPanel() {
         </div>
       ))}
       <div className="text-[9.5px] text-mut/70 mt-2 leading-relaxed">
-        Расчётное значение: координаты {settings.lat !== null ? ruNum(settings.lat, 4) : "—"}°,{" "}
-        {settings.lon !== null ? ruNum(settings.lon, 4) : "—"}° · часовой пояс браузера
+        Расчётное значение: координаты {lat !== null ? ruNum(lat, 4) : "—"}°,{" "}
+        {lon !== null ? ruNum(lon, 4) : "—"}° · часовой пояс браузера
+        <span className="block mt-0.5">Координаты хранятся в памяти Gateway (NVS)</span>
       </div>
     </Card>
   );

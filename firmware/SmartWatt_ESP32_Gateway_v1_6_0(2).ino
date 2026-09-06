@@ -95,6 +95,12 @@ String staSsid;
 String staPassword;
 bool staPasswordStored = false;
 
+// User location and weather source. Stored in NVS (Preferences), survive reboot.
+// NAN means "not set" — no default location is ever assumed.
+float cfgLatitude = NAN;
+float cfgLongitude = NAN;
+String cfgWeatherProvider = "none";  // "none" | "open-meteo"
+
 static const uint16_t EXPECTED_NORMAL_RESPONSE = 1 + 1 + 1 + (MODBUS_REGISTER_COUNT * 2) + 2;
 
 // Explicit forward declarations. Arduino's automatic prototype generator can
@@ -741,6 +747,10 @@ String buildConfigJson() {
   doc["http_port"] = HTTP_PORT;
   doc["websocket_port"] = WEBSOCKET_PORT;
   doc["wifi_reconnect_interval_ms"] = WIFI_RECONNECT_INTERVAL_MS;
+  // User settings (NVS): location + weather provider. null = not set.
+  if (isfinite(cfgLatitude)) doc["latitude"] = cfgLatitude; else doc["latitude"] = nullptr;
+  if (isfinite(cfgLongitude)) doc["longitude"] = cfgLongitude; else doc["longitude"] = nullptr;
+  doc["weather_provider"] = cfgWeatherProvider;
   String out;
   serializeJson(doc, out);
   return out;
@@ -903,6 +913,35 @@ bool saveWiFiCredentials(const String &ssid, const String &password) {
   return true;
 }
 
+// ---- User location & weather provider (NVS, survive reboot) ----
+// NAN means "not set"; no default coordinates are ever assumed.
+void loadLocationSettings() {
+  preferences.begin("smartwatt", true);
+  cfgLatitude = preferences.getFloat("latitude", NAN);
+  cfgLongitude = preferences.getFloat("longitude", NAN);
+  cfgWeatherProvider = preferences.getString("weather_prov", "none");
+  preferences.end();
+  if (!isfinite(cfgLatitude) || cfgLatitude < -90.0f || cfgLatitude > 90.0f) cfgLatitude = NAN;
+  if (!isfinite(cfgLongitude) || cfgLongitude < -180.0f || cfgLongitude > 180.0f) cfgLongitude = NAN;
+  if (cfgWeatherProvider != "none" && cfgWeatherProvider != "open-meteo") cfgWeatherProvider = "none";
+}
+
+bool saveLocationSettings(bool hasLat, float lat, bool hasLon, float lon,
+                          bool hasProv, const String &prov) {
+  if (hasLat && (!isfinite(lat) || lat < -90.0f || lat > 90.0f)) return false;
+  if (hasLon && (!isfinite(lon) || lon < -180.0f || lon > 180.0f)) return false;
+  if (hasProv && prov != "none" && prov != "open-meteo") return false;
+  preferences.begin("smartwatt", false);
+  if (hasLat) preferences.putFloat("latitude", lat);
+  if (hasLon) preferences.putFloat("longitude", lon);
+  if (hasProv) preferences.putString("weather_prov", prov);
+  preferences.end();
+  if (hasLat) cfgLatitude = lat;
+  if (hasLon) cfgLongitude = lon;
+  if (hasProv) cfgWeatherProvider = prov;
+  return true;
+}
+
 String buildWiFiSettingsJson() {
   JsonDocument doc;
   doc["ssid"] = staSsid;
@@ -1025,6 +1064,29 @@ void setupWebServer() {
   });
   server.on("/api/raw", HTTP_GET, []() { server.send(200, "application/json", buildRawJson()); });
   server.on("/api/config", HTTP_GET, []() { server.send(200, "application/json", buildConfigJson()); });
+  server.on("/api/config", HTTP_POST, []() {
+    JsonDocument req;
+    const DeserializationError err = deserializeJson(req, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return;
+    }
+    const bool hasLat = !req["latitude"].isNull();
+    const bool hasLon = !req["longitude"].isNull();
+    const bool hasProv = !req["weather_provider"].isNull();
+    const float lat = hasLat ? req["latitude"].as<float>() : NAN;
+    const float lon = hasLon ? req["longitude"].as<float>() : NAN;
+    const String prov = hasProv ? req["weather_provider"].as<String>() : String();
+    if (!saveLocationSettings(hasLat, lat, hasLon, lon, hasProv, prov)) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_value\"}");
+      return;
+    }
+    logEvent("[CFG] Settings saved lat=%s lon=%s provider=%s",
+             hasLat ? String(lat, 5).c_str() : "-",
+             hasLon ? String(lon, 5).c_str() : "-",
+             hasProv ? prov.c_str() : "-");
+    server.send(200, "application/json", buildConfigJson());
+  });
   server.on("/api/engineering", HTTP_GET, []() { server.send(200, "application/json", buildEngineeringJson()); });
   server.on("/api/logs", HTTP_GET, []() { server.send(200, "text/plain; charset=utf-8", getEventLogText()); });
   server.on("/api/wifi", HTTP_GET, []() {
@@ -1207,6 +1269,7 @@ void setup() {
 
   ModbusSerial.begin(MODBUS_BAUDRATE, SERIAL_8N1, RS232_RX_PIN, RS232_TX_PIN);
   Serial.printf("[JBD] UART1 RX=%d TX=%d baud=%u\n", JBD_RX_PIN, JBD_TX_PIN, JBD_BAUDRATE);
+  loadLocationSettings();
   connectWiFiInitial();
 
   setupWebServer();
