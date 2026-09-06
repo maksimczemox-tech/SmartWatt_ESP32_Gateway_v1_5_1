@@ -97,6 +97,12 @@ bool staPasswordStored = false;
 
 static const uint16_t EXPECTED_NORMAL_RESPONSE = 1 + 1 + 1 + (MODBUS_REGISTER_COUNT * 2) + 2;
 
+// Explicit forward declarations. Arduino's automatic prototype generator can
+// miss functions that use project-defined types or appear later in the .ino file.
+void copyJbdData(JbdData &out);
+void copyJbdDiagnostics(JbdDiagnostics &out);
+void startFallbackAP();
+
 void logEvent(const char *fmt, ...) {
   char body[LOG_LINE_LENGTH - 24];
   va_list args;
@@ -580,9 +586,20 @@ String buildFlatDataJson() {
   jsonSetFloat(root, "chargePower", d.chargePower);
   jsonSetFloat(root, "maxChargeCurrent", d.maxChargeCurrent);
   jsonSetFloat(root, "maxChargePower", d.maxChargePower);
-  jsonSetFloat(root, "loadVoltage", d.loadVoltage);
-  jsonSetFloat(root, "loadCurrent", d.loadCurrent);
-  jsonSetFloat(root, "loadPower", d.loadPower);
+
+  JbdData b;
+  copyJbdData(b);
+
+  // Physical load is connected directly to the battery, not to MPPT load terminals.
+  // BMS power: positive = charging, negative = discharging.
+  // Estimated load = PV power - signed battery power.
+  float estimatedLoadPower = NAN;
+  if (isfinite(d.pvPower) && isfinite(b.power)) estimatedLoadPower = max(0.0f, d.pvPower - b.power);
+  jsonSetFloat(root, "loadVoltage", b.voltage);
+  jsonSetFloat(root, "loadCurrent", (isfinite(estimatedLoadPower) && isfinite(b.voltage) && b.voltage > 0.1f) ? estimatedLoadPower / b.voltage : NAN);
+  jsonSetFloat(root, "loadPower", estimatedLoadPower);
+  root["loadSource"] = "CALCULATED_FROM_PV_AND_JBD_BMS";
+  root["loadFormula"] = "max(0, PV_power - BMS_power)";
   if (d.loadEnabledValid) root["loadState"] = d.loadEnabled; else root["loadState"] = nullptr;
   jsonSetFloat(root, "maxLoadCurrent", d.maxLoadCurrent);
   jsonSetFloat(root, "maxLoadPower", d.maxLoadPower);
@@ -601,8 +618,6 @@ String buildFlatDataJson() {
   root["fullCharges"] = d.fullChargeCount;
   root["overDischarges"] = d.overDischargeCount;
 
-  JbdData b;
-  copyJbdData(b);
   root["bmsOnline"] = b.online;
   root["bmsDataAgeMs"] = b.timestamp ? (millis() - b.timestamp) : 0;
   jsonSetFloat(root, "bmsVoltage", b.voltage);
@@ -795,7 +810,7 @@ String buildEngineeringJson() {
 String buildDiagnosticDownload() {
   String out;
   out.reserve(14000);
-  out += "SmartWatt Solar + JBD BMS Gateway v1.6.0 - diagnostic log\r\n";
+  out += "SmartWatt Solar + JBD BMS Gateway v1.6.1 - diagnostic log\r\n";
   out += "=================================================\r\n";
   out += "Uptime ms: " + String(millis()) + "\r\n";
   out += "Free heap: " + String(ESP.getFreeHeap()) + "\r\n";
@@ -1152,7 +1167,7 @@ void setup() {
   delay(300);
   Serial.println();
   Serial.println("================================");
-  Serial.println("SmartWatt Solar + JBD BMS Gateway v1.6.0");
+  Serial.println("SmartWatt Solar + JBD BMS Gateway v1.6.1");
   Serial.println("================================");
   Serial.println("[System] ESP32 starting");
   Serial.println("[System] READ ONLY firmware - Modbus Function 03 only");
@@ -1171,7 +1186,7 @@ void setup() {
     Serial.println("[FATAL] Cannot create mutex");
     while (true) delay(1000);
   }
-  logEvent("[SYSTEM] Boot v1.6.0, read-only Solar + JBD gateway");
+  logEvent("[SYSTEM] Boot v1.6.1, read-only Solar + JBD gateway");
 
   ModbusSerial.begin(MODBUS_BAUDRATE, SERIAL_8N1, RS232_RX_PIN, RS232_TX_PIN);
   Serial.printf("[JBD] UART1 RX=%d TX=%d baud=%u\n", JBD_RX_PIN, JBD_TX_PIN, JBD_BAUDRATE);
