@@ -10,21 +10,33 @@ import { Clock3, Sunrise, Sunset } from "lucide-react";
 
 /**
  * Центральная энергетическая сцена.
- * Физическая схема: Солнечные панели → АКБ → Расчётная нагрузка.
- * Нагрузка подключена к аккумулятору, поэтому прямой линии PV → Нагрузка нет.
  *
- * Потоки (только реальные мощности, интенсивность и скорость зависят от W):
- *   Панели → АКБ   когда PV > 0 (заряд — мощность заряда; разряд — питание шины)
- *   АКБ → Нагрузка когда расчётная нагрузка > 0
+ * Модель энергетического БАЛАНСА с промежуточным узлом «ЭНЕРГЕТИЧЕСКАЯ ШИНА»:
  *
- * Анимация ничего не вычисляет и не создаёт значений.
+ *   СОЛНЕЧНЫЕ ПАНЕЛИ
+ *           ↓
+ *   ЭНЕРГЕТИЧЕСКАЯ ШИНА
+ *        ↙       ↘
+ *      АКБ      РАСЧЁТНАЯ НАГРУЗКА
+ *
+ * АКБ имеет одно nettо-направление в каждый момент:
+ *   BMS > 0  → шина → АКБ (заряд)
+ *   BMS < 0  → АКБ → шина (разряд)
+ *   BMS = null → направление неизвестно («НЕТ ДАННЫХ»), поток не рисуется
+ *
+ * Одновременные «PV → АКБ» и «АКБ → нагрузка» никогда не показываются:
+ * при заряде нагрузка питается от шины долей PV, при разряде АКБ отдаёт
+ * энергию в шину вместе с PV.
+ *
+ * Расчётная нагрузка = max(0, PV − BMS); loadPower контроллера не используется.
+ * Анимация зависит от реальной мощности; при отсутствии данных остановлена.
  */
 
-const HORIZON_Y = 318;
+const HORIZON_Y = 240;
 
 function arcPoint(t: number): { x: number; y: number } {
   const P0 = { x: 80, y: HORIZON_Y };
-  const PC = { x: 470, y: 40 };
+  const PC = { x: 470, y: 28 };
   const P1 = { x: 860, y: HORIZON_Y };
   const u = 1 - t;
   return {
@@ -75,7 +87,6 @@ function Flow({
   y2,
   watts,
   color,
-  curve = 0,
 }: {
   x1: number;
   y1: number;
@@ -83,13 +94,9 @@ function Flow({
   y2: number;
   watts: number | null;
   color: string;
-  curve?: number;
 }) {
   const active = watts !== null && watts > 0;
-  const d =
-    curve === 0
-      ? `M ${x1} ${y1} L ${x2} ${y2}`
-      : `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - curve} ${x2} ${y2}`;
+  const d = `M ${x1} ${y1} L ${x2} ${y2}`;
   return (
     <g>
       <path d={d} stroke="#1A2A35" strokeWidth={1.4} fill="none" />
@@ -132,32 +139,21 @@ export function EnergyScene() {
 
   const pv = num(data?.pvPower);
   const batt = bat.power;
-  const load = estimatedLoadPower(pv, batt);
+  const load = estimatedLoadPower(pv, batt); /* max(0, PV − BMS) */
   const soc = bat.soc;
   const charging = batt !== null && batt > 0;
   const discharging = batt !== null && batt < 0;
 
+  /* ---- потоки энергетического баланса (только реальные мощности) ---- */
+  const flowPvBus = pv !== null && pv > 0 ? pv : null; /* PV → шина */
+  const flowBusBatt = charging ? batt : null; /* шина → АКБ (заряд) */
+  const flowBattBus = discharging ? Math.abs(batt as number) : null; /* АКБ → шина (разряд) */
+  const flowBusLoad = load !== null && load > 0 ? load : null; /* шина → нагрузка */
+
+  const busLive = flowPvBus !== null || charging || discharging || flowBusLoad !== null;
+
   const beamOn = pv !== null && pv > 0;
   const beamW = beamOn && pv !== null ? pv : 0; /* визуальный параметр линии, не данные */
-
-  /*
-   * Потоки строго по физической модели (нагрузка подключена к АКБ):
-   *  A: PV > 0, АКБ заряжается      → Панели → АКБ (мощность заряда)
-   *  B: PV > 0, АКБ разряжается     → Панели → система (доля PV) + АКБ → нагрузка;
-   *                                   линия Панели → АКБ НЕ рисуется
-   *  C: PV = 0, АКБ разряжается     → АКБ → нагрузка
-   *  D: PV = null                   → поток PV не рисуется
-   *  E: BMS power = null            → направление потока АКБ не определяется («Нет данных»)
-   *  F: расчётная нагрузка          → max(0, PV − BMS); loadPower не используется
-   */
-  const flowCharge = batt !== null && batt > 0 && beamOn ? batt : null; /* A */
-  const flowPvSys = discharging && beamOn && pv !== null ? pv : null; /* B: PV → система */
-  const flowBL =
-    batt !== null && batt < 0
-      ? Math.abs(batt) /* B/C: доля АКБ в нагрузке */
-      : batt !== null && batt > 0 && load !== null && load > 0
-        ? load /* A: расчётная нагрузка при заряде */
-        : null;
 
   const sunPos = sun !== null ? sunVisualPos(sun) : null;
   const phase = sun?.phase ?? null;
@@ -165,8 +161,21 @@ export function EnergyScene() {
   const battFill = soc === null ? null : Math.min(100, Math.max(0, soc));
   const battColor = charging ? "#70D900" : (battFill ?? 100) < 20 ? "#FF3D32" : (battFill ?? 100) < 45 ? "#FFC400" : "#70D900";
 
+  /* подписи потоков */
+  const pvLabel = pv === null ? "PV: НЕТ ДАННЫХ" : `PV → шина · ${fmt(pv, 0)} W`;
+  const battLabel =
+    batt === null
+      ? "АКБ: НЕТ ДАННЫХ"
+      : charging
+        ? `заряд · ${fmt(batt, 0)} W`
+        : discharging
+          ? `разряд · ${fmt(Math.abs(batt), 0)} W`
+          : `${fmt(batt, 0)} W`;
+  const battLabelColor = batt === null ? "#8A969F" : charging ? "#70D900" : discharging ? "#FF3D32" : "#8A969F";
+  const loadLabel = load === null ? "НЕТ ДАННЫХ" : `${fmt(load, 0)} W`;
+
   return (
-    <svg viewBox="0 0 940 560" className="w-full h-auto block select-none" role="img" aria-label="Энергетическая система">
+    <svg viewBox="0 0 940 700" className="w-full h-auto block select-none" role="img" aria-label="Энергетическая система">
       <defs>
         <linearGradient id="skyDay" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#0B2036" />
@@ -213,13 +222,13 @@ export function EnergyScene() {
       </g>
 
       {/* земля */}
-      <rect x="0" y={HORIZON_Y + 22} width="940" height={560 - HORIZON_Y - 22} fill="url(#groundGrad)" />
+      <rect x="0" y={HORIZON_Y + 22} width="940" height={700 - HORIZON_Y - 22} fill="url(#groundGrad)" />
       <line x1="0" y1={HORIZON_Y + 22} x2="940" y2={HORIZON_Y + 22} stroke="#1A2A35" strokeWidth="1.5" />
 
       {/* направляющая траектория: ВОСТОК → ЮГ → ЗАПАД */}
-      <path d={`M 80 ${HORIZON_Y} Q 470 40 860 ${HORIZON_Y}`} fill="none" stroke="#27404F" strokeWidth="1.2" strokeDasharray="2 6" />
+      <path d={`M 80 ${HORIZON_Y} Q 470 28 860 ${HORIZON_Y}`} fill="none" stroke="#27404F" strokeWidth="1.2" strokeDasharray="2 6" />
       <text x={74} y={HORIZON_Y + 16} fontSize={10} fill="#8A969F" className="svg-label" textAnchor="middle">ВОСТОК</text>
-      <text x={470} y={30} fontSize={10} fill="#8A969F" className="svg-label" textAnchor="middle">ЮГ</text>
+      <text x={470} y={20} fontSize={10} fill="#8A969F" className="svg-label" textAnchor="middle">ЮГ</text>
       <text x={866} y={HORIZON_Y + 16} fontSize={10} fill="#8A969F" className="svg-label" textAnchor="middle">ЗАПАД</text>
 
       {/* Солнце: позиция из реальных азимута и высоты */}
@@ -250,17 +259,17 @@ export function EnergyScene() {
         </g>
       )}
       {sun !== null && sun.polarNight && (
-        <text x="470" y="150" textAnchor="middle" fontSize={12} fill="#8A969F" className="svg-label">
+        <text x="470" y="140" textAnchor="middle" fontSize={12} fill="#8A969F" className="svg-label">
           Полярная ночь — Солнце не восходит
         </text>
       )}
       {sun !== null && !sun.polarNight && sun.elevationDeg <= 0 && (
-        <text x="470" y="150" textAnchor="middle" fontSize={12} fill="#8A969F" className="svg-label">
+        <text x="470" y="140" textAnchor="middle" fontSize={12} fill="#8A969F" className="svg-label">
           Солнце за горизонтом
         </text>
       )}
       {sun === null && (
-        <text x="470" y="150" textAnchor="middle" fontSize={12} fill="#8A969F" className="svg-label">
+        <text x="470" y="140" textAnchor="middle" fontSize={12} fill="#8A969F" className="svg-label">
           Местоположение не задано — расчёт Солнца не выполняется
         </text>
       )}
@@ -270,8 +279,8 @@ export function EnergyScene() {
         <line
           x1={sunPos.x}
           y1={sunPos.y + 18}
-          x2={196}
-          y2={404}
+          x2={470}
+          y2={290}
           stroke="#FFC400"
           strokeWidth={beamOn ? flowWidth(beamW) : 1}
           strokeDasharray="3 9"
@@ -280,96 +289,105 @@ export function EnergyScene() {
         />
       )}
 
-      {/* ===== СОЛНЕЧНЫЕ ПАНЕЛИ (слева) ===== */}
+      {/* ===== СОЛНЕЧНЫЕ ПАНЕЛИ (центр, под Солнцем) ===== */}
       <g>
-        <polygon points="106,408 286,408 268,368 124,368" fill="url(#panelGrad)" stroke={beamOn ? "#FFC40088" : "#27404F"} strokeWidth="1.5" />
+        <polygon points="382,326 558,326 540,288 400,288" fill="url(#panelGrad)" stroke={beamOn ? "#FFC40088" : "#27404F"} strokeWidth="1.5" />
         {[1, 2, 3].map((i) => (
-          <line key={`v${i}`} x1={124 + i * 36} y1={368 + i * 1.5} x2={106 + i * 45} y2={408} stroke="#163450" strokeWidth="1" />
+          <line key={`v${i}`} x1={400 + i * 35} y1={288 + i} x2={382 + i * 44} y2={326} stroke="#163450" strokeWidth="1" />
         ))}
-        {[1, 2].map((i) => (
-          <line key={`h${i}`} x1={115 + i * 4.5} y1={368 + i * 13.3} x2={277 - i * 4.5} y2={368 + i * 13.3} stroke="#163450" strokeWidth="1" />
-        ))}
-        <rect x="189" y="408" width="14" height="24" fill="#101B25" stroke="#27404F" />
-        <text x="196" y="352" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-label" letterSpacing="2">СОЛНЕЧНАЯ ГЕНЕРАЦИЯ</text>
-        <text x="196" y="456" textAnchor="middle" fontSize={22} fill={beamOn ? "#FFC400" : "#8A969F"} className="svg-num" fontWeight={700}>
+        <line x1="394" y1="300.7" x2="546" y2="300.7" stroke="#163450" strokeWidth="1" />
+        <line x1="388" y1="313.3" x2="552" y2="313.3" stroke="#163450" strokeWidth="1" />
+        <rect x="463" y="326" width="14" height="20" fill="#101B25" stroke="#27404F" />
+        <text x="470" y="274" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-label" letterSpacing="2">СОЛНЕЧНЫЕ ПАНЕЛИ</text>
+        <text x="470" y="364" textAnchor="middle" fontSize={22} fill={beamOn ? "#FFC400" : "#8A969F"} className="svg-num" fontWeight={700}>
           {pv === null ? "—" : `${fmt(pv, 0)} W`}
         </text>
-        <text x="196" y="474" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-num">
+        <text x="470" y="382" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-num">
           {fmt(data?.pvVoltage, 1)} V · {fmt(data?.pvCurrent, 2)} A
         </text>
       </g>
 
-      {/* ===== АККУМУЛЯТОР (центр) ===== */}
+      {/* ===== ЭНЕРГЕТИЧЕСКАЯ ШИНА ===== */}
       <g>
-        <rect x="416" y="352" width="108" height="10" rx="3" fill="#27404F" />
-        <rect x="400" y="362" width="140" height="112" rx="6" fill="#101B25" stroke={charging ? "#70D90077" : "#27404F"} strokeWidth="1.5" />
+        {busLive && <rect x="330" y="450" width="280" height="14" rx="7" fill="none" stroke="#0878D1" strokeWidth="7" opacity="0.16" />}
+        <rect x="330" y="450" width="280" height="14" rx="7" fill="#101B25" stroke={busLive ? "#0878D199" : "#27404F"} strokeWidth="1.5" style={{ transition: "stroke .5s" }} />
+        <text x="470" y="460.5" textAnchor="middle" fontSize={9} letterSpacing="2.5" fill={busLive ? "#2F9BE8" : "#8A969F"} className="svg-label">
+          ЭНЕРГЕТИЧЕСКАЯ ШИНА
+        </text>
+      </g>
+
+      {/* ===== АККУМУЛЯТОР (ниже шины, слева) ===== */}
+      <g>
+        <rect x="271" y="492" width="28" height="8" rx="2" fill="#27404F" />
+        <rect x="210" y="500" width="150" height="110" rx="6" fill="#101B25" stroke={charging ? "#70D90077" : "#27404F"} strokeWidth="1.5" />
         <clipPath id="battClip">
-          <rect x="404" y="366" width="132" height="104" rx="4" />
+          <rect x="214" y="504" width="142" height="102" rx="4" />
         </clipPath>
         <g clipPath="url(#battClip)">
           {battFill !== null && (
             <rect
-              x="404"
-              width="132"
-              y={366 + 104 - (104 * battFill) / 100}
-              height={(104 * battFill) / 100}
+              x="214"
+              width="142"
+              y={504 + 102 - (102 * battFill) / 100}
+              height={(102 * battFill) / 100}
               fill={battColor}
               opacity={0.5}
               style={{ transition: "y .8s ease, height .8s ease, fill .5s" }}
             />
           )}
-          {charging && <rect x="404" y="366" width="132" height="30" fill="rgba(255,255,255,0.28)" className="charge-sheen" />}
+          {charging && <rect x="214" y="504" width="142" height="28" fill="rgba(255,255,255,0.28)" className="charge-sheen" />}
         </g>
-        <text x="470" y="410" textAnchor="middle" fontSize={24} fill="#F1F4F6" className="svg-num" fontWeight={700}>
+        <text x="285" y="546" textAnchor="middle" fontSize={24} fill="#F1F4F6" className="svg-num" fontWeight={700}>
           {soc === null ? "—" : `${fmt(soc, 0)}%`}
         </text>
-        <text x="470" y="430" textAnchor="middle" fontSize={11.5} fill="#8A969F" className="svg-num">
+        <text x="285" y="566" textAnchor="middle" fontSize={11.5} fill="#8A969F" className="svg-num">
           {fmt(bat.voltage, 2)} V · {fmt(bat.current, 2)} A
         </text>
-        <text x="470" y="448" textAnchor="middle" fontSize={11.5} fill={charging ? "#70D900" : discharging ? "#FF3D32" : "#8A969F"} className="svg-num">
+        <text x="285" y="586" textAnchor="middle" fontSize={11.5} fill={charging ? "#70D900" : discharging ? "#FF3D32" : "#8A969F"} className="svg-num">
           {batt === null ? "нет данных" : `${batt > 0 ? "+" : ""}${fmt(batt, 0)} W ${charging ? "· заряд" : discharging ? "· разряд" : ""}`}
         </text>
-        <text x="470" y="498" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-label" letterSpacing="2">АККУМУЛЯТОР</text>
+        <text x="285" y="630" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-label" letterSpacing="2">АККУМУЛЯТОР</text>
       </g>
 
-      {/* ===== РАСЧЁТНАЯ НАГРУЗКА (справа) ===== */}
+      {/* ===== РАСЧЁТНАЯ НАГРУЗКА (ниже шины, справа) ===== */}
       <g>
-        <rect x="660" y="380" width="180" height="84" rx="6" fill="#101B25" stroke={flowBL !== null ? "#FF3D3266" : "#27404F"} strokeWidth="1.5" />
-        <circle cx="690" cy="422" r="13" fill="none" stroke={load !== null && load > 0 ? "#FF3D32" : "#27404F"} strokeWidth="2" />
-        <circle cx="690" cy="422" r="4" fill={load !== null && load > 0 ? "#FF3D32" : "#27404F"} />
-        <text x="766" y="416" textAnchor="middle" fontSize={22} fill={load !== null && load > 0 ? "#FF3D32" : "#8A969F"} className="svg-num" fontWeight={700}>
+        <rect x="610" y="500" width="190" height="88" rx="6" fill="#101B25" stroke={flowBusLoad !== null ? "#FF3D3266" : "#27404F"} strokeWidth="1.5" />
+        <circle cx="640" cy="544" r="13" fill="none" stroke={load !== null && load > 0 ? "#FF3D32" : "#27404F"} strokeWidth="2" />
+        <circle cx="640" cy="544" r="4" fill={load !== null && load > 0 ? "#FF3D32" : "#27404F"} />
+        <text x="716" y="538" textAnchor="middle" fontSize={22} fill={load !== null && load > 0 ? "#FF3D32" : "#8A969F"} className="svg-num" fontWeight={700}>
           {load === null ? "—" : `${fmt(load, 0)} W`}
         </text>
-        <text x="766" y="436" textAnchor="middle" fontSize={9.5} fill="#8A969F" className="svg-label">источник: PV − АКБ</text>
-        <text x="750" y="488" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-label" letterSpacing="2">РАСЧЁТНАЯ НАГРУЗКА</text>
+        <text x="716" y="558" textAnchor="middle" fontSize={9.5} fill="#8A969F" className="svg-label">источник: PV − АКБ</text>
+        <text x="705" y="612" textAnchor="middle" fontSize={11} fill="#8A969F" className="svg-label" letterSpacing="2">РАСЧЁТНАЯ НАГРУЗКА</text>
       </g>
 
-      {/* ===== потоки (физическая схема: панели → АКБ → нагрузка) ===== */}
+      {/* ===== потоки энергетического баланса ===== */}
 
-      {/* A: Панели → АКБ, только когда АКБ заряжается */}
-      <Flow x1={292} y1={412} x2={398} y2={412} watts={flowCharge} color="#70D900" />
-      <text x={345} y={400} textAnchor="middle" fontSize={11} fill={flowCharge !== null && flowCharge > 0 ? "#70D900" : "#8A969F"} className="svg-num">
-        {batt === null ? "Нет данных" : flowCharge !== null ? `заряд ${fmt(flowCharge, 0)} W` : "—"}
+      {/* PV → шина */}
+      <Flow x1={470} y1={394} x2={470} y2={448} watts={flowPvBus} color="#FFC400" />
+      <text x={482} y={426} fontSize={11} fill={pv !== null && pv > 0 ? "#FFC400" : "#8A969F"} className="svg-num">
+        {pvLabel}
       </text>
 
-      {/* B: Панели → система (доля PV в нагрузке), только когда АКБ разряжается */}
-      <Flow x1={292} y1={392} x2={700} y2={380} watts={flowPvSys} color="#FFC400" curve={90} />
-      <text x={496} y={300} textAnchor="middle" fontSize={11} fill={flowPvSys !== null && flowPvSys > 0 ? "#FFC400" : "#8A969F"} className="svg-num">
-        {flowPvSys !== null && flowPvSys > 0 ? `PV → система ${fmt(flowPvSys, 0)} W` : ""}
+      {/* шина → АКБ (только при заряде) */}
+      <Flow x1={338} y1={458} x2={285} y2={490} watts={flowBusBatt} color="#70D900" />
+      {/* АКБ → шина (только при разряде) */}
+      <Flow x1={285} y1={490} x2={338} y2={458} watts={flowBattBus} color="#FF3D32" />
+      <text x={306} y={474} textAnchor="end" fontSize={11} fill={battLabelColor} className="svg-num">
+        {battLabel}
       </text>
 
-      {/* АКБ → Расчётная нагрузка */}
-      <Flow x1={542} y1={420} x2={658} y2={420} watts={flowBL} color="#FF3D32" />
-      <text x={600} y={442} textAnchor="middle" fontSize={11} fill={flowBL !== null && flowBL > 0 ? "#FF3D32" : "#8A969F"} className="svg-num">
-        {batt === null ? "Нет данных" : flowBL !== null ? `${discharging ? "разряд " : ""}${fmt(flowBL, 0)} W` : "—"}
+      {/* шина → нагрузка */}
+      <Flow x1={602} y1={458} x2={698} y2={496} watts={flowBusLoad} color="#FF3D32" />
+      <text x={656} y={474} fontSize={11} fill={load !== null && load > 0 ? "#FF3D32" : "#8A969F"} className="svg-num">
+        {loadLabel}
       </text>
 
       {/* строка состояния */}
-      <text x="20" y="546" fontSize={10} fill="#8A969F" className="svg-label">
+      <text x="20" y="684" fontSize={10} fill="#8A969F" className="svg-label">
         BMS: {bmsState === "ONLINE" ? "В СЕТИ" : bmsState === "OFFLINE" ? "НЕТ СВЯЗИ" : bmsState === "STALE" ? "ДАННЫЕ УСТАРЕЛИ" : "НЕТ ДАННЫХ"}
         {"  ·  "}
         Темп. АКБ: {fmt(bat.temp, 1)} °C
-        {discharging && pv !== null && pv > 0 ? "  ·  PV + АКБ → нагрузка" : ""}
       </text>
     </svg>
   );
