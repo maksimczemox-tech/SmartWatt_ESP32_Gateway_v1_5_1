@@ -64,6 +64,12 @@ const DATA_POLL_MS = 5_000;
 const BMS_POLL_MS = 8_000;
 const STATUS_POLL_MS = 10_000;
 const MAX_SAMPLES = 3_600;
+/**
+ * Максимальный возраст данных /api/bms (мс), при котором их ещё можно
+ * отнести к текущему телеметрическому фрейму. Если data_age_ms неизвестен
+ * или больше порога — BMS не синхронизируется с исторической точкой.
+ */
+const BMS_SYNC_MAX_AGE_MS = 10_000;
 
 function mergeTelemetry(prev: SystemData | null, next: SystemData): SystemData {
   /* Полный фрейм (есть timestamp/dataAgeMs) заменяет состояние целиком. */
@@ -163,6 +169,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const failsRef = useRef(0);
   const everOnlineRef = useRef(false);
   const versionDoneRef = useRef(false);
+  /** Актуальный снапшот /api/bms для безопасной синхронизации samples. */
+  const bmsRef = useRef<BmsData | null>(null);
+  bmsRef.current = bms;
 
   const now = useNow(1000);
 
@@ -176,8 +185,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
     /* ring buffer: сохраняем только реально полученный фрейм */
     const ts = normTs(frame.timestamp) ?? received;
     const pv = frame.pvPower ?? null;
-    const batt = frame.bmsPower ?? null;
-    const soc = frame.batterySOC ?? frame.bmsSOC ?? null;
+    let batt = frame.bmsPower ?? null;
+    let soc = frame.batterySOC ?? frame.bmsSOC ?? null;
+
+    /*
+     * Безопасная синхронизация BMS с исторической точкой.
+     * 1) BMS из фрейма телеметрии — если реально присутствует.
+     * 2) Если отсутствует — данные /api/bms берутся ТОЛЬКО при доказанной
+     *    свежести их измерения (data_age_ms ≤ порога синхронизации).
+     * 3) Если время измерения BMS неизвестно (data_age_ms нет) —
+     *    значения не приклеиваются к точке (null), чтобы не смешивать
+     *    данные разных моментов. Искусственные timestamp не создаются.
+     */
+    if (batt === null || soc === null) {
+      const b = bmsRef.current;
+      const bAge = num(b?.data_age_ms);
+      if (b !== null && bAge !== null && bAge <= BMS_SYNC_MAX_AGE_MS) {
+        if (batt === null) batt = num(b.power);
+        if (soc === null) soc = num(b.soc);
+      }
+    }
+
     const load = estimatedLoadPower(pv, batt);
     const valid = toBool(frame.online) !== false;
     setSamples((prev) => {

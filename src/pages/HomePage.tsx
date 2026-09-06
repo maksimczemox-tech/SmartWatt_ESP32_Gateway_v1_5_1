@@ -211,7 +211,7 @@ function ExtraParams() {
 /* ---------------- главная ---------------- */
 
 export function HomePage() {
-  const { data, status, bat, samples, sessionStart, conn, telemetryState, bmsState, controllerState } = useData();
+  const { data, bms, status, bat, samples, sessionStart, conn, telemetryState, bmsState, controllerState } = useData();
   const [settings, setSettings] = useSettings();
 
   const [windowH, setWindowH] = useState<number | null>(1);
@@ -222,7 +222,9 @@ export function HomePage() {
   const soc = bat.soc;
   const charging = batt !== null && batt > 0;
 
-  const bmsAge = num(data?.bmsDataAgeMs ?? status?.bms_data_age_ms);
+  /* Возраст данных BMS: единый приоритет реальных источников */
+  const bmsAge =
+    num(data?.bmsDataAgeMs) ?? num(status?.bms_data_age_ms) ?? num(bms?.data_age_ms);
   const bmsStale = bmsAge !== null && bmsAge > STALE_MS;
 
   const forecast = useMemo(

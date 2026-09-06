@@ -6,7 +6,9 @@ import { fmt, num, str } from "../utils/format";
 
 export function BatteryPage() {
   const { data, bat } = useData();
-  const charging = (bat.power ?? num(data?.chargePower) ?? 0) > 0;
+  /* Три состояния по реальной мощности АКБ: заряд / разряд / нет данных */
+  const charging = bat.power !== null && bat.power > 0;
+  const discharging = bat.power !== null && bat.power < 0;
 
   return (
     <div>
@@ -32,8 +34,18 @@ export function BatteryPage() {
           icon={<Gauge size={13} />}
           delay={50}
           right={
-            <span className={`text-[10px] font-semibold tracking-[0.12em] ${charging ? "text-ok" : "text-mut"}`}>
-              {charging ? "ЗАРЯД" : str(data?.chargeState) !== "—" ? str(data?.chargeState) : ""}
+            <span
+              className={`text-[10px] font-semibold tracking-[0.12em] ${
+                charging ? "text-ok" : discharging ? "text-bad" : "text-mut"
+              }`}
+            >
+              {charging
+                ? "ЗАРЯД"
+                : discharging
+                  ? "РАЗРЯД"
+                  : bat.power === null
+                    ? "НЕТ ДАННЫХ"
+                    : str(data?.chargeState)}
             </span>
           }
         >

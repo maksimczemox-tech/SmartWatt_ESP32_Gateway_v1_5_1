@@ -86,7 +86,11 @@ export function BmsPage() {
           <Card title="Сводка по ячейкам" icon={<Cpu size={13} />} delay={110}>
             <KV k="Минимальная ячейка">{fmt(bms?.min_cell_v, 3)} V</KV>
             <KV k="Максимальная ячейка">{fmt(bms?.max_cell_v, 3)} V</KV>
-            <KV k="Разброс ячеек">{fmt(bms?.delta_cell_v !== null && bms?.delta_cell_v !== undefined ? (bms.delta_cell_v ?? 0) * 1000 : null, 0)} mV</KV>
+                        <KV k="Разброс ячеек">
+              {bms?.delta_cell_v !== null && bms?.delta_cell_v !== undefined
+                ? `${fmt(bms.delta_cell_v * 1000, 0)} mV`
+                : "—"}
+            </KV>
             <KV k="Среднее напряжение">
               {bms?.cells && bms.cells.filter((c) => typeof c === "number").length > 0
                 ? `${(

@@ -75,6 +75,7 @@ function Flow({
   y2,
   watts,
   color,
+  curve = 0,
 }: {
   x1: number;
   y1: number;
@@ -82,9 +83,13 @@ function Flow({
   y2: number;
   watts: number | null;
   color: string;
+  curve?: number;
 }) {
   const active = watts !== null && watts > 0;
-  const d = `M ${x1} ${y1} L ${x2} ${y2}`;
+  const d =
+    curve === 0
+      ? `M ${x1} ${y1} L ${x2} ${y2}`
+      : `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - curve} ${x2} ${y2}`;
   return (
     <g>
       <path d={d} stroke="#1A2A35" strokeWidth={1.4} fill="none" />
@@ -134,11 +139,25 @@ export function EnergyScene() {
 
   const beamOn = pv !== null && pv > 0;
   const beamW = beamOn && pv !== null ? pv : 0; /* визуальный параметр линии, не данные */
-  /* Панели → АКБ: при заряде — мощность заряда; при разряде PV питает шину */
-  const flowPB = beamOn ? (charging ? batt : pv) : null;
-  const flowPBLabel = charging ? "заряд" : "питание";
-  /* АКБ → Нагрузка: расчётная нагрузка */
-  const flowBL = load !== null && load > 0 ? load : null;
+
+  /*
+   * Потоки строго по физической модели (нагрузка подключена к АКБ):
+   *  A: PV > 0, АКБ заряжается      → Панели → АКБ (мощность заряда)
+   *  B: PV > 0, АКБ разряжается     → Панели → система (доля PV) + АКБ → нагрузка;
+   *                                   линия Панели → АКБ НЕ рисуется
+   *  C: PV = 0, АКБ разряжается     → АКБ → нагрузка
+   *  D: PV = null                   → поток PV не рисуется
+   *  E: BMS power = null            → направление потока АКБ не определяется («Нет данных»)
+   *  F: расчётная нагрузка          → max(0, PV − BMS); loadPower не используется
+   */
+  const flowCharge = batt !== null && batt > 0 && beamOn ? batt : null; /* A */
+  const flowPvSys = discharging && beamOn && pv !== null ? pv : null; /* B: PV → система */
+  const flowBL =
+    batt !== null && batt < 0
+      ? Math.abs(batt) /* B/C: доля АКБ в нагрузке */
+      : batt !== null && batt > 0 && load !== null && load > 0
+        ? load /* A: расчётная нагрузка при заряде */
+        : null;
 
   const sunPos = sun !== null ? sunVisualPos(sun) : null;
   const phase = sun?.phase ?? null;
@@ -326,13 +345,23 @@ export function EnergyScene() {
       </g>
 
       {/* ===== потоки (физическая схема: панели → АКБ → нагрузка) ===== */}
-      <Flow x1={292} y1={412} x2={398} y2={412} watts={flowPB} color={charging ? "#70D900" : "#FFC400"} />
-      <text x={345} y={400} textAnchor="middle" fontSize={11} fill={flowPB !== null && flowPB > 0 ? (charging ? "#70D900" : "#FFC400") : "#8A969F"} className="svg-num">
-        {flowPBLabel} {flowPB === null ? "—" : `${fmt(flowPB, 0)} W`}
+
+      {/* A: Панели → АКБ, только когда АКБ заряжается */}
+      <Flow x1={292} y1={412} x2={398} y2={412} watts={flowCharge} color="#70D900" />
+      <text x={345} y={400} textAnchor="middle" fontSize={11} fill={flowCharge !== null && flowCharge > 0 ? "#70D900" : "#8A969F"} className="svg-num">
+        {batt === null ? "Нет данных" : flowCharge !== null ? `заряд ${fmt(flowCharge, 0)} W` : "—"}
       </text>
+
+      {/* B: Панели → система (доля PV в нагрузке), только когда АКБ разряжается */}
+      <Flow x1={292} y1={392} x2={700} y2={380} watts={flowPvSys} color="#FFC400" curve={90} />
+      <text x={496} y={300} textAnchor="middle" fontSize={11} fill={flowPvSys !== null && flowPvSys > 0 ? "#FFC400" : "#8A969F"} className="svg-num">
+        {flowPvSys !== null && flowPvSys > 0 ? `PV → система ${fmt(flowPvSys, 0)} W` : ""}
+      </text>
+
+      {/* АКБ → Расчётная нагрузка */}
       <Flow x1={542} y1={420} x2={658} y2={420} watts={flowBL} color="#FF3D32" />
-      <text x={600} y={442} textAnchor="middle" fontSize={11} fill={flowBL !== null ? "#FF3D32" : "#8A969F"} className="svg-num">
-        {flowBL === null ? "—" : `${fmt(flowBL, 0)} W`}
+      <text x={600} y={442} textAnchor="middle" fontSize={11} fill={flowBL !== null && flowBL > 0 ? "#FF3D32" : "#8A969F"} className="svg-num">
+        {batt === null ? "Нет данных" : flowBL !== null ? `${discharging ? "разряд " : ""}${fmt(flowBL, 0)} W` : "—"}
       </text>
 
       {/* строка состояния */}
