@@ -599,7 +599,9 @@ String buildFlatDataJson() {
   if (isfinite(d.pvPower) && isfinite(b.power)) estimatedLoadPower = max(0.0f, d.pvPower - b.power);
   jsonSetFloat(root, "loadVoltage", b.voltage);
   jsonSetFloat(root, "loadCurrent", (isfinite(estimatedLoadPower) && isfinite(b.voltage) && b.voltage > 0.1f) ? estimatedLoadPower / b.voltage : NAN);
-  jsonSetFloat(root, "loadPower", estimatedLoadPower);
+  // Real MPPT load power from register 0x0106 (d.loadPower); NAN -> JSON null.
+  // The max(0, PV - BMS) estimate stays separate (loadCurrent) and never replaces it.
+  jsonSetFloat(root, "loadPower", d.loadPower);
   root["loadSource"] = "CALCULATED_FROM_PV_AND_JBD_BMS";
   root["loadFormula"] = "max(0, PV_power - BMS_power)";
   if (d.loadEnabledValid) root["loadState"] = d.loadEnabled; else root["loadState"] = nullptr;
