@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { useData } from "../store/DataContext";
-import { useSettings } from "../hooks/useSettings";
 import { useNow } from "../hooks/useNow";
+import { useWeather } from "../hooks/useWeather";
 import { sunInfo, type SunInfo } from "../utils/sun";
 import { estimatedLoadPower } from "../utils/energy";
-import { deg, fmt, fmtTime, hm, num, ruNum } from "../utils/format";
+import { deg, fmt, fmtDateTime, fmtTime, hm, num, ruNum, str } from "../utils/format";
 import { Card, SubsystemChip } from "./ui";
 import { Clock3, Sunrise, Sunset } from "lucide-react";
 
@@ -125,16 +125,16 @@ const STARS = Array.from({ length: 26 }, (_, i) => ({
 }));
 
 export function EnergyScene() {
-  const { data, bmsState, bat } = useData();
-  const [settings] = useSettings();
+  const { data, bmsState, bat, espConfig } = useData();
   const now = useNow(1000);
 
+  /* Координаты — из настроек Gateway (NVS), не из браузера. */
+  const lat = num(espConfig?.latitude);
+  const lon = num(espConfig?.longitude);
+
   const sun: SunInfo | null = useMemo(
-    () =>
-      settings.lat !== null && settings.lon !== null
-        ? sunInfo(new Date(now), settings.lat, settings.lon)
-        : null,
-    [now, settings.lat, settings.lon],
+    () => (lat !== null && lon !== null ? sunInfo(new Date(now), lat, lon) : null),
+    [now, lat, lon],
   );
 
   const pv = num(data?.pvPower);
@@ -396,14 +396,14 @@ export function EnergyScene() {
 /* ---------------- панель параметров Солнца ---------------- */
 
 export function SunPanel() {
-  const [settings] = useSettings();
+  const { espConfig } = useData();
   const now = useNow(1000);
+  /* Координаты — из настроек Gateway (NVS), не из браузера. */
+  const lat = num(espConfig?.latitude);
+  const lon = num(espConfig?.longitude);
   const sun = useMemo(
-    () =>
-      settings.lat !== null && settings.lon !== null
-        ? sunInfo(new Date(now), settings.lat, settings.lon)
-        : null,
-    [now, settings.lat, settings.lon],
+    () => (lat !== null && lon !== null ? sunInfo(new Date(now), lat, lon) : null),
+    [now, lat, lon],
   );
 
   if (sun === null) {
@@ -475,8 +475,9 @@ export function SunPanel() {
         </div>
       ))}
       <div className="text-[9.5px] text-mut/70 mt-2 leading-relaxed">
-        Расчётное значение: координаты {settings.lat !== null ? ruNum(settings.lat, 4) : "—"}°,{" "}
-        {settings.lon !== null ? ruNum(settings.lon, 4) : "—"}° · часовой пояс браузера
+        Расчётное значение: координаты {lat !== null ? ruNum(lat, 4) : "—"}°,{" "}
+        {lon !== null ? ruNum(lon, 4) : "—"}° · часовой пояс браузера
+        <span className="block mt-0.5">Координаты хранятся в памяти Gateway (NVS)</span>
       </div>
     </Card>
   );
@@ -489,5 +490,63 @@ export function SysTile({ label, state }: { label: string; state: Parameters<typ
       <span className="text-[10px] tracking-[0.12em] uppercase text-mut">{label}</span>
       <SubsystemChip state={state} />
     </div>
+  );
+}
+
+/* ---------------- панель погоды (браузер → погодный API, координаты с ESP32) ---------------- */
+
+export function WeatherPanel() {
+  const { espConfig } = useData();
+  const lat = num(espConfig?.latitude);
+  const lon = num(espConfig?.longitude);
+  const providerId = str(espConfig?.weather_provider) !== "—" ? (str(espConfig?.weather_provider) as string) : null;
+  const weather = useWeather(providerId, lat, lon);
+
+  const statusText =
+    weather.status === "ok"
+      ? "Получено"
+      : weather.status === "loading"
+        ? "Загрузка…"
+        : weather.status === "no-data"
+          ? "НЕТ ДАННЫХ"
+          : weather.status === "unavailable"
+            ? "ПОГОДА НЕДОСТУПНА"
+            : weather.status === "no-coords"
+              ? "Местоположение не задано"
+              : "Погода отключена";
+
+  return (
+    <Card title="Погода" icon={<Clock3 size={13} />} delay={120}>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.14em] text-mut mb-0.5">Облачность</div>
+          <div
+            className={`num font-semibold text-[26px] leading-8 ${
+              weather.status === "ok" ? "text-ink" : "text-mut"
+            }`}
+          >
+            {weather.cloudCover === null ? "—" : `${ruNum(weather.cloudCover, 0)} %`}
+          </div>
+          <div className="text-[10.5px] text-mut mt-1">
+            {statusText}
+            {weather.fetchedAt !== null && (
+              <span className="ml-1.5">· {fmtDateTime(weather.fetchedAt)}</span>
+            )}
+          </div>
+        </div>
+        <div className="text-right text-[10px] text-mut leading-relaxed">
+          <div>{weather.providerLabel ?? "Провайдер не выбран"}</div>
+          <div className="text-mut/70">
+            {lat !== null && lon !== null
+              ? `${ruNum(lat, 4)}°, ${ruNum(lon, 4)}°`
+              : "Координаты не заданы"}
+          </div>
+        </div>
+      </div>
+      <p className="text-[9.5px] text-mut/70 mt-2.5 leading-relaxed">
+        Погода запрашивается браузером напрямую у погодного API по координатам из Gateway.
+        0 % показывается только если источник реально вернул ноль.
+      </p>
+    </Card>
   );
 }

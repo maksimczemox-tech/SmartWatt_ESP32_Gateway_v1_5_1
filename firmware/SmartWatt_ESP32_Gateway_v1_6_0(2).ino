@@ -95,6 +95,12 @@ String staSsid;
 String staPassword;
 bool staPasswordStored = false;
 
+// User location and weather source. Stored in NVS (Preferences), survive reboot.
+// NAN means "not set" — no default location is ever assumed.
+float cfgLatitude = NAN;
+float cfgLongitude = NAN;
+String cfgWeatherProvider = "none";  // "none" | "open-meteo"
+
 static const uint16_t EXPECTED_NORMAL_RESPONSE = 1 + 1 + 1 + (MODBUS_REGISTER_COUNT * 2) + 2;
 
 // Explicit forward declarations. Arduino's automatic prototype generator can
@@ -572,7 +578,9 @@ String buildFlatDataJson() {
   root["wifi"] = (WiFi.status() == WL_CONNECTED);
   root["ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
   root["timestamp"] = d.timestamp;
-  root["dataAgeMs"] = d.timestamp ? (millis() - d.timestamp) : 0;
+  // Unknown timestamp -> unknown age (JSON null), never 0 ("fresh").
+  if (d.timestamp) root["dataAgeMs"] = millis() - d.timestamp;
+  else root["dataAgeMs"] = nullptr;
 
   if (isfinite(d.batterySoc)) root["batterySOC"] = d.batterySoc; else root["batterySOC"] = nullptr;
   jsonSetFloat(root, "batteryVoltage", d.batteryVoltage);
@@ -597,7 +605,9 @@ String buildFlatDataJson() {
   if (isfinite(d.pvPower) && isfinite(b.power)) estimatedLoadPower = max(0.0f, d.pvPower - b.power);
   jsonSetFloat(root, "loadVoltage", b.voltage);
   jsonSetFloat(root, "loadCurrent", (isfinite(estimatedLoadPower) && isfinite(b.voltage) && b.voltage > 0.1f) ? estimatedLoadPower / b.voltage : NAN);
-  jsonSetFloat(root, "loadPower", estimatedLoadPower);
+  // Real MPPT load power from register 0x0106 (d.loadPower); NAN -> JSON null.
+  // The max(0, PV - BMS) estimate stays separate (loadCurrent) and never replaces it.
+  jsonSetFloat(root, "loadPower", d.loadPower);
   root["loadSource"] = "CALCULATED_FROM_PV_AND_JBD_BMS";
   root["loadFormula"] = "max(0, PV_power - BMS_power)";
   if (d.loadEnabledValid) root["loadState"] = d.loadEnabled; else root["loadState"] = nullptr;
@@ -619,14 +629,18 @@ String buildFlatDataJson() {
   root["overDischarges"] = d.overDischargeCount;
 
   root["bmsOnline"] = b.online;
-  root["bmsDataAgeMs"] = b.timestamp ? (millis() - b.timestamp) : 0;
+  // Unknown BMS timestamp -> unknown age (JSON null), never 0 ("fresh").
+  if (b.timestamp) root["bmsDataAgeMs"] = millis() - b.timestamp;
+  else root["bmsDataAgeMs"] = nullptr;
   jsonSetFloat(root, "bmsVoltage", b.voltage);
   jsonSetFloat(root, "bmsCurrent", b.current);
   jsonSetFloat(root, "bmsPower", b.power);
   jsonSetFloat(root, "bmsRemainingAh", b.remainingAh);
   jsonSetFloat(root, "bmsFullCapacityAh", b.fullCapacityAh);
   root["bmsCycles"] = b.cycles;
-  root["bmsSOC"] = b.online ? b.soc : 0;
+  // OFFLINE -> JSON null (SOC unknown). A real SOC=0 while ONLINE stays 0.
+  if (b.online) root["bmsSOC"] = b.soc;
+  else root["bmsSOC"] = nullptr;
   root["bmsCellCount"] = b.cellCount;
   root["bmsNtcCount"] = b.ntcCount;
   jsonSetFloat(root, "bmsMinCellVoltage", b.minCellVoltage);
@@ -672,11 +686,15 @@ String buildStatusJson() {
   JbdData b; copyJbdData(b);
   JbdDiagnostics jd; copyJbdDiagnostics(jd);
   doc["bms_online"] = b.online;
-  doc["bms_data_age_ms"] = b.timestamp ? millis() - b.timestamp : 0;
+  // Unknown BMS timestamp -> unknown age (JSON null), never 0.
+  if (b.timestamp) doc["bms_data_age_ms"] = millis() - b.timestamp;
+  else doc["bms_data_age_ms"] = nullptr;
   doc["bms_requests"] = jd.requests;
   doc["bms_errors"] = jd.errors;
   doc["uptime_ms"] = millis();
-  doc["data_age_ms"] = d.timestamp ? millis() - d.timestamp : 0;
+  // Unknown timestamp -> unknown age (JSON null), never 0.
+  if (d.timestamp) doc["data_age_ms"] = millis() - d.timestamp;
+  else doc["data_age_ms"] = nullptr;
   doc["firmware_version"] = SMARTWATT_FIRMWARE_VERSION;
   doc["free_heap"] = ESP.getFreeHeap();
   doc["min_free_heap"] = ESP.getMinFreeHeap();
@@ -729,6 +747,10 @@ String buildConfigJson() {
   doc["http_port"] = HTTP_PORT;
   doc["websocket_port"] = WEBSOCKET_PORT;
   doc["wifi_reconnect_interval_ms"] = WIFI_RECONNECT_INTERVAL_MS;
+  // User settings (NVS): location + weather provider. null = not set.
+  if (isfinite(cfgLatitude)) doc["latitude"] = cfgLatitude; else doc["latitude"] = nullptr;
+  if (isfinite(cfgLongitude)) doc["longitude"] = cfgLongitude; else doc["longitude"] = nullptr;
+  doc["weather_provider"] = cfgWeatherProvider;
   String out;
   serializeJson(doc, out);
   return out;
@@ -758,7 +780,9 @@ String buildEngineeringJson() {
   doc["ap_enabled"] = fallbackApStarted;
   doc["ap_ip"] = fallbackApStarted ? WiFi.softAPIP().toString() : "";
   doc["controller_online"] = d.online;
-  doc["data_age_ms"] = d.timestamp ? millis() - d.timestamp : 0;
+  // Unknown timestamp -> unknown age (JSON null), never 0.
+  if (d.timestamp) doc["data_age_ms"] = millis() - d.timestamp;
+  else doc["data_age_ms"] = nullptr;
   doc["modbus_errors"] = modbusErrors;
   doc["modbus_retries"] = modbusRetryCount;
   doc["last_modbus_error"] = lastModbusError;
@@ -773,7 +797,9 @@ String buildEngineeringJson() {
   JbdData b; copyJbdData(b);
   JbdDiagnostics jd; copyJbdDiagnostics(jd);
   doc["bms_online"] = b.online;
-  doc["bms_data_age_ms"] = b.timestamp ? millis() - b.timestamp : 0;
+  // Unknown BMS timestamp -> unknown age (JSON null), never 0.
+  if (b.timestamp) doc["bms_data_age_ms"] = millis() - b.timestamp;
+  else doc["bms_data_age_ms"] = nullptr;
   doc["bms_voltage"] = b.voltage;
   doc["bms_current"] = b.current;
   doc["bms_soc"] = b.soc;
@@ -857,7 +883,6 @@ String buildDiagnosticDownload() {
   return out;
 }
 
-
 void loadWiFiCredentials() {
   preferences.begin("smartwatt", true);
   staSsid = preferences.getString("wifi_ssid", WIFI_SSID);
@@ -885,6 +910,35 @@ bool saveWiFiCredentials(const String &ssid, const String &password) {
   staSsid = ssid;
   staPassword = password;
   staPasswordStored = password.length() > 0;
+  return true;
+}
+
+// ---- User location & weather provider (NVS, survive reboot) ----
+// NAN means "not set"; no default coordinates are ever assumed.
+void loadLocationSettings() {
+  preferences.begin("smartwatt", true);
+  cfgLatitude = preferences.getFloat("latitude", NAN);
+  cfgLongitude = preferences.getFloat("longitude", NAN);
+  cfgWeatherProvider = preferences.getString("weather_prov", "none");
+  preferences.end();
+  if (!isfinite(cfgLatitude) || cfgLatitude < -90.0f || cfgLatitude > 90.0f) cfgLatitude = NAN;
+  if (!isfinite(cfgLongitude) || cfgLongitude < -180.0f || cfgLongitude > 180.0f) cfgLongitude = NAN;
+  if (cfgWeatherProvider != "none" && cfgWeatherProvider != "open-meteo") cfgWeatherProvider = "none";
+}
+
+bool saveLocationSettings(bool hasLat, float lat, bool hasLon, float lon,
+                          bool hasProv, const String &prov) {
+  if (hasLat && (!isfinite(lat) || lat < -90.0f || lat > 90.0f)) return false;
+  if (hasLon && (!isfinite(lon) || lon < -180.0f || lon > 180.0f)) return false;
+  if (hasProv && prov != "none" && prov != "open-meteo") return false;
+  preferences.begin("smartwatt", false);
+  if (hasLat) preferences.putFloat("latitude", lat);
+  if (hasLon) preferences.putFloat("longitude", lon);
+  if (hasProv) preferences.putString("weather_prov", prov);
+  preferences.end();
+  if (hasLat) cfgLatitude = lat;
+  if (hasLon) cfgLongitude = lon;
+  if (hasProv) cfgWeatherProvider = prov;
   return true;
 }
 
@@ -930,7 +984,9 @@ String buildBmsJson() {
   JbdDiagnostics jd; copyJbdDiagnostics(jd);
   JsonDocument doc;
   doc["online"] = b.online;
-  doc["data_age_ms"] = b.timestamp ? millis() - b.timestamp : 0;
+  // Unknown BMS timestamp -> unknown age (JSON null), never 0.
+  if (b.timestamp) doc["data_age_ms"] = millis() - b.timestamp;
+  else doc["data_age_ms"] = nullptr;
   jsonSetFloat(doc.as<JsonObject>(), "voltage", b.voltage);
   jsonSetFloat(doc.as<JsonObject>(), "current", b.current);
   jsonSetFloat(doc.as<JsonObject>(), "power", b.power);
@@ -1008,6 +1064,29 @@ void setupWebServer() {
   });
   server.on("/api/raw", HTTP_GET, []() { server.send(200, "application/json", buildRawJson()); });
   server.on("/api/config", HTTP_GET, []() { server.send(200, "application/json", buildConfigJson()); });
+  server.on("/api/config", HTTP_POST, []() {
+    JsonDocument req;
+    const DeserializationError err = deserializeJson(req, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return;
+    }
+    const bool hasLat = !req["latitude"].isNull();
+    const bool hasLon = !req["longitude"].isNull();
+    const bool hasProv = !req["weather_provider"].isNull();
+    const float lat = hasLat ? req["latitude"].as<float>() : NAN;
+    const float lon = hasLon ? req["longitude"].as<float>() : NAN;
+    const String prov = hasProv ? req["weather_provider"].as<String>() : String();
+    if (!saveLocationSettings(hasLat, lat, hasLon, lon, hasProv, prov)) {
+      server.send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_value\"}");
+      return;
+    }
+    logEvent("[CFG] Settings saved lat=%s lon=%s provider=%s",
+             hasLat ? String(lat, 5).c_str() : "-",
+             hasLon ? String(lon, 5).c_str() : "-",
+             hasProv ? prov.c_str() : "-");
+    server.send(200, "application/json", buildConfigJson());
+  });
   server.on("/api/engineering", HTTP_GET, []() { server.send(200, "application/json", buildEngineeringJson()); });
   server.on("/api/logs", HTTP_GET, []() { server.send(200, "text/plain; charset=utf-8", getEventLogText()); });
   server.on("/api/wifi", HTTP_GET, []() {
@@ -1190,6 +1269,7 @@ void setup() {
 
   ModbusSerial.begin(MODBUS_BAUDRATE, SERIAL_8N1, RS232_RX_PIN, RS232_TX_PIN);
   Serial.printf("[JBD] UART1 RX=%d TX=%d baud=%u\n", JBD_RX_PIN, JBD_TX_PIN, JBD_BAUDRATE);
+  loadLocationSettings();
   connectWiFiInitial();
 
   setupWebServer();

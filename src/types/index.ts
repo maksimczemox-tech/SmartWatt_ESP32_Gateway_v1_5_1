@@ -57,9 +57,6 @@ export interface SystemData {
 
   dailyChargeAh?: number | null;
   dailyLoadAh?: number | null;
-  /** Только если прошивка реально предоставляет эти поля. */
-  dailyChargeWh?: number | null;
-  dailyLoadWh?: number | null;
 
   totalChargeAh?: number | null;
   totalLoadAh?: number | null;
@@ -283,6 +280,26 @@ export interface SamplePoint {
   load: number | null;
   soc: number | null;
   valid: boolean;
+}
+
+/* ---------------- GET/POST /api/config ---------------- */
+
+export interface ConfigData {
+  /** Широта, −90…+90. null = не задана (значение по умолчанию не предполагается). */
+  latitude?: number | null;
+  /** Долгота, −180…+180. null = не задана. */
+  longitude?: number | null;
+  /** Источник погоды: "none" | "open-meteo". Хранится в NVS Gateway. */
+  weather_provider?: string | null;
+  /** Остальные поля конфигурации прошивки (baudrate, slave_id и т.д.). */
+  [key: string]: unknown;
+}
+
+/** Патч для POST /api/config: обновляются только переданные поля. */
+export interface EspConfigPatch {
+  latitude?: number | null;
+  longitude?: number | null;
+  weather_provider?: string | null;
 }
 
 /* ---------------- store ---------------- */

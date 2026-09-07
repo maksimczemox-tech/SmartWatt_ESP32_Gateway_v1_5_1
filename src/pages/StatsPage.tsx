@@ -58,16 +58,22 @@ export function StatsPage() {
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
           {(
             [
-              ["Энергия заряда АКБ · сегодня", num(data?.dailyChargeWh), "Счётчик прошивки dailyChargeWh"],
-              ["Вчера", null, null],
-              ["7 дней", null, null],
-              ["30 дней", null, null],
-            ] as [string, number | null, string | null][]
-          ).map(([label, v, hint]) => (
+              ["Заряд АКБ · сегодня", num(data?.dailyChargeAh), "Ah", "Счётчик прошивки dailyChargeAh"],
+              ["Нагрузка · сегодня", num(data?.dailyLoadAh), "Ah", "Счётчик прошивки dailyLoadAh"],
+              ["Всего заряда", num(data?.totalChargeWh), "Wh", "Счётчик прошивки totalChargeWh"],
+              ["Всего нагрузки", num(data?.totalLoadWh), "Wh", "Счётчик прошивки totalLoadWh"],
+            ] as [string, number | null, string, string | null][]
+          ).map(([label, v, unitStr, hint]) => (
             <div key={label} className="rounded border border-line bg-panel2/70 px-3 py-2.5">
               <div className="text-[9.5px] tracking-[0.14em] uppercase text-mut">{label}</div>
               <div className="num font-semibold text-[19px] mt-1">
-                {v === null ? <span className="text-[12px] text-mut font-normal">Недостаточно данных для отчета</span> : kwh(v)}
+                {v === null ? (
+                  <span className="text-[12px] text-mut font-normal">Нет исторических данных</span>
+                ) : unitStr === "Wh" ? (
+                  kwh(v)
+                ) : (
+                  `${fmt(v, 1)} Ah`
+                )}
               </div>
               {hint && <div className="text-[9.5px] text-mut/70 mt-0.5">{hint}</div>}
             </div>

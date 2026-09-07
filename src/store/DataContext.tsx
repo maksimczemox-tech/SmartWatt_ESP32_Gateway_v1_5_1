@@ -24,8 +24,10 @@ import {
 } from "react";
 import {
   type BmsData,
+  type ConfigData,
   type ConnectionStatus,
   type EngineeringData,
+  type EspConfigPatch,
   type LogEntry,
   type RawData,
   type SamplePoint,
@@ -43,6 +45,7 @@ import {
   isRecord,
   normalizeLogs,
   validateBmsData,
+  validateConfigData,
   validateRawData,
   validateStatusData,
   validateSystemData,
@@ -109,13 +112,20 @@ interface DataContextValue {
 
   /**
    * Показания АКБ с логичным приоритетом источников (только реальные значения):
-   *   SOC:        data.batterySOC → data.bmsSOC → /api/bms soc
+   *   SOC:        /api/bms soc (только при BMS ONLINE) → data.bmsSOC →
+   *               data.batterySOC (MPPT — резерв, явно обозначается socSource)
    *   Мощность:   data.bmsPower → /api/bms power
    *   Напряжение: data.batteryVoltage → data.bmsVoltage → /api/bms voltage
+   *   Ток:        data.batteryCurrent → data.bmsCurrent → /api/bms current
    *   Ёмкости:    data.bms*Ah → /api/bms
-   * Если ни одного реального источника нет — null («Нет данных»).
+   * Если ни одного реального источника нет — null («Нет данных»), не 0.
    */
   bat: BatteryDerived;
+
+  /** Настройки Gateway (координаты, источник погоды) — хранятся в NVS ESP32. */
+  espConfig: ConfigData | null;
+  /** POST /api/config: сохранить настройки на Gateway; null при ошибке. */
+  saveEspConfig: (patch: EspConfigPatch) => Promise<ConfigData | null>;
 
   /** Реально полученные samples (ring buffer). Момент запуска интерфейса. */
   samples: SamplePoint[];
@@ -134,8 +144,13 @@ interface DataContextValue {
   setShowSources: (v: boolean) => void;
 }
 
+/** Откуда взято главное значение SOC системы. */
+export type SocSource = "bms" | "bmsFlat" | "mppt" | null;
+
 export interface BatteryDerived {
   soc: number | null;
+  /** Источник SOC: JBD BMS → bmsSOC телеметрии → MPPT (резерв). */
+  socSource: SocSource;
   voltage: number | null;
   current: number | null;
   power: number | null;
@@ -159,6 +174,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [showSources, setShowSources] = useState(false);
   const [samples, setSamples] = useState<SamplePoint[]>([]);
   const [sessionStart] = useState<number>(() => Date.now());
+  /** Настройки Gateway (координаты, источник погоды). Источник истины — ESP32 (NVS). */
+  const [espConfig, setEspConfig] = useState<ConfigData | null>(null);
 
   const failsRef = useRef(0);
   const everOnlineRef = useRef(false);
@@ -189,7 +206,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const ts = normTs(frame.timestamp) ?? received;
     const pv = frame.pvPower ?? null;
     const batt = frame.bmsPower ?? null;
-    const soc = frame.batterySOC ?? frame.bmsSOC ?? null;
+    /* Приоритет SOC в исторической точке — JBD BMS (поле самого фрейма). */
+    const soc = frame.bmsSOC ?? frame.batterySOC ?? null;
     const load = estimatedLoadPower(pv, batt);
     const valid = toBool(frame.online) !== false;
     setSamples((prev) => {
@@ -335,10 +353,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [now],
   );
 
-  /* Показания АКБ: приоритет телеметрии /api/data, затем реальные данные /api/bms. */
-  const bat = useMemo<BatteryDerived>(
-    () => ({
-      soc: num(data?.batterySOC) ?? num(data?.bmsSOC) ?? num(bms?.soc),
+  /*
+   * Показания АКБ. Главный источник SOC — JBD BMS:
+   *   1) /api/bms → soc        (только при bms.online = true — иначе это
+   *                               последнее известное значение, не текущее);
+   *   2) /api/data → bmsSOC    (прошивка отдаёт null при OFFLINE BMS);
+   *   3) /api/data → batterySOC (MPPT) — только как явно обозначенный резерв.
+   * Отсутствие SOC во всех источниках → null («НЕТ ДАННЫХ»), не 0.
+   */
+  const bat = useMemo<BatteryDerived>(() => {
+    const bmsOnline = toBool(bms?.online) === true;
+    const socBms = bmsOnline ? num(bms?.soc) : null;
+    const socFlat = num(data?.bmsSOC);
+    const socMppt = num(data?.batterySOC);
+    const soc = socBms ?? socFlat ?? socMppt;
+    const socSource: SocSource =
+      soc === null ? null : socBms !== null ? "bms" : socFlat !== null ? "bmsFlat" : "mppt";
+    return {
+      soc,
+      socSource,
       voltage: num(data?.batteryVoltage) ?? num(data?.bmsVoltage) ?? num(bms?.voltage),
       current: num(data?.batteryCurrent) ?? num(data?.bmsCurrent) ?? num(bms?.current),
       power: num(data?.bmsPower) ?? num(bms?.power),
@@ -346,9 +379,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       fullAh: num(data?.bmsFullCapacityAh) ?? num(bms?.full_capacity_ah),
       temp: num(data?.batteryTemp),
       cycles: num(data?.bmsCycles) ?? num(bms?.cycles),
-    }),
-    [data, bms],
-  );
+    };
+  }, [data, bms]);
 
   /* ---------------- действия (единственный путь UI → Gateway) ---------------- */
 
@@ -363,6 +395,35 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (!isRecord(res)) throw new Error("Некорректные данные /api/config");
     return res;
   }, []);
+
+  /**
+   * Сохранение настроек (координаты, источник погоды) в NVS Gateway:
+   * POST /api/config. Возвращает фактически сохранённые значения или null
+   * при ошибке — UI обязан показать ошибку, а не делать вид, что сохранено.
+   */
+  const saveEspConfig = useCallback(
+    async (patch: EspConfigPatch): Promise<ConfigData | null> => {
+      try {
+        const res = await api.post<unknown>("/api/config", patch);
+        const v = validateConfigData(res);
+        if (v) setEspConfig(v);
+        return v;
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
+
+  /* Конфигурация загружается с Gateway при старте и после каждого сохранения. */
+  useEffect(() => {
+    fetchConfig()
+      .then((c) => {
+        const v = validateConfigData(c);
+        if (v) setEspConfig(v);
+      })
+      .catch(() => undefined);
+  }, [fetchConfig]);
 
   const fetchLogs = useCallback(async () => {
     const res = await api.get<unknown>("/api/logs");
@@ -428,6 +489,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       bmsState,
       controllerState,
       bat,
+      espConfig,
+      saveEspConfig,
       samples,
       sessionStart,
       fetchEngineering,
@@ -459,6 +522,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       bmsState,
       controllerState,
       bat,
+      espConfig,
+      saveEspConfig,
       samples,
       sessionStart,
       fetchEngineering,

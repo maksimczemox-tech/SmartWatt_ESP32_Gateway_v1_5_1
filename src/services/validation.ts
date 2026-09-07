@@ -16,6 +16,7 @@
 
 import type {
   BmsData,
+  ConfigData,
   JbdDiagnostics,
   LogEntry,
   RawData,
@@ -99,8 +100,6 @@ const SYS_NUM = [
   "faultCode",
   "dailyChargeAh",
   "dailyLoadAh",
-  "dailyChargeWh",
-  "dailyLoadWh",
   "totalChargeAh",
   "totalLoadAh",
   "totalChargeWh",
@@ -367,5 +366,21 @@ export function normalizeLogs(res: unknown): LogEntry[] {
       level: sanitizeString(item.level ?? item.lvl),
     });
   }
+  return out;
+}
+
+/* ---------------- /api/config ---------------- */
+
+/**
+ * Пользовательские настройки Gateway (координаты, источник погоды).
+ * null = не задано; диапазоны проверяет прошивка, здесь — только санитарная
+ * нормализация типов (NaN/Infinity/строки → null).
+ */
+export function validateConfigData(raw: unknown): ConfigData | null {
+  if (!isRecord(raw)) return null;
+  const out: ConfigData = {};
+  if ("latitude" in raw) out.latitude = sanitizeNumber(raw.latitude);
+  if ("longitude" in raw) out.longitude = sanitizeNumber(raw.longitude);
+  if ("weather_provider" in raw) out.weather_provider = sanitizeString(raw.weather_provider);
   return out;
 }

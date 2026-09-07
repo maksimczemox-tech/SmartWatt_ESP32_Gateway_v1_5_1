@@ -1,27 +1,26 @@
 /**
- * Пользовательские настройки интерфейса.
- * Хранятся ТОЛЬКО в localStorage браузера и никогда не отправляются на ESP32
- * (соответствующего API в прошивке нет).
+ * Пользовательские настройки ИНТЕРФЕЙСА.
+ * Хранятся в localStorage браузера и никогда не отправляются на ESP32.
  * Это НЕ телеметрия.
+ *
+ * ВНИМАНИЕ: координаты (широта/долгота) и источник погоды здесь НЕ хранятся —
+ * они сохраняются в энергонезависимой памяти Gateway (NVS) и читаются через
+ * GET /api/config (источник истины — ESP32, см. DataContext.espConfig).
  */
 
 import { useCallback, useEffect, useState } from "react";
 import type { ForecastMode } from "../utils/energy";
 
 export interface UserSettings {
-  lat: number | null;
-  lon: number | null;
   /** Минимальный SOC для расчёта автономности, % (0–100, по умолчанию 20). */
   minSoc: number;
   /** Режим прогноза зарядки. */
   forecastMode: ForecastMode;
 }
 
-const KEY = "smartwatt:settings:v1";
+const KEY = "smartwatt:settings:v2";
 
 const DEFAULTS: UserSettings = {
-  lat: null,
-  lon: null,
   minSoc: 20,
   /* предпочтительна средняя мощность заряда по реальным samples */
   forecastMode: "average",
@@ -39,14 +38,10 @@ function load(): UserSettings {
     const p: unknown = JSON.parse(raw);
     if (typeof p !== "object" || p === null) return DEFAULTS;
     const o = p as Record<string, unknown>;
-    const lat = clampNum(o.lat, -90, 90);
-    const lon = clampNum(o.lon, -180, 180);
     const minSoc = clampNum(o.minSoc, 0, 100) ?? DEFAULTS.minSoc;
     const forecastMode: ForecastMode =
       o.forecastMode === "average" ? "average" : "current";
     return {
-      lat: lat ?? null,
-      lon: lon ?? null,
       minSoc: Math.round(minSoc),
       forecastMode,
     };

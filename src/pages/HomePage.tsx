@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useData, STALE_MS } from "../store/DataContext";
 import { Card, Metric, OnOffChip, SourceTag } from "../components/ui";
-import { EnergyScene, SunPanel, SysTile } from "../components/EnergyScene";
+import { EnergyScene, SunPanel, SysTile, WeatherPanel } from "../components/EnergyScene";
 import { SamplesChart, WindowSwitch, type SeriesDef } from "../components/charts";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -278,7 +278,10 @@ export function HomePage() {
         >
           <EnergyScene />
         </Card>
-        <SunPanel />
+        <div className="space-y-3 min-w-0">
+          <SunPanel />
+          <WeatherPanel />
+        </div>
       </div>
 
       {/* КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ */}
@@ -419,7 +422,8 @@ export function HomePage() {
           </div>
           <div className="grid grid-cols-2 gap-x-6">
           <Metric label="Энергия заряда АКБ (день)" value={data?.dailyChargeAh} digits={1} unitStr="Ah" source="/api/data · dailyChargeAh"
-            sub={<span>Энергия, переданная в аккумулятор · {data?.dailyChargeWh === null || data?.dailyChargeWh === undefined ? "" : kwh(data.dailyChargeWh)}</span>} />            <Metric label="Энергия на нагрузку (день)" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
+            sub={<span>Счётчик прошивки · Ah за день</span>} />
+            <Metric label="Энергия на нагрузку (день)" value={data?.dailyLoadAh} digits={1} unitStr="Ah" source="/api/data · dailyLoadAh" />
             <Metric label="Всего в аккумулятор" value={data?.totalChargeWh} digits={0} unitStr="Wh" source="/api/data · totalChargeWh"
               sub={<span className="num">{kwh(data?.totalChargeWh)}</span>} />
             <Metric label="Всего на нагрузку" value={data?.totalLoadWh} digits={0} unitStr="Wh" source="/api/data · totalLoadWh"
